@@ -82,31 +82,78 @@ This is worth stating plainly in the post. It is a real architectural constraint
 
 ---
 
+## The two-call flow, and why
+
+Retrieval needs a vector, and the vector comes from a model that downloads ~300 MB
+on first use. Making that a gate on first paint would mean a judge on a mid-range
+Android watches a spinner before seeing anything.
+
+So the client makes **two calls**:
+
+```
+1. GET /api/advice?trail=galiyat&days=7
+   → scored days render immediately. The verdict is the product.
+
+2. Embed the focal day's condition sentence, LOCALLY
+   → 768 floats
+
+3. GET /api/advice?trail=galiyat&days=7&embedding=…
+   → same cached forecast, now with real vector retrieval
+```
+
+The model also warms up ~1.5 s after load, while the user is still reading the
+trail list. The upside is not latency — it is that **the app is fully useful on
+first paint and offline**, and the model is an enhancement rather than a
+prerequisite. If local inference fails outright, step 2 returns null, the second
+call never happens, and the server falls back to keyword match.
+
+The server-side keyword fallback exists for exactly this. It is on the cut list,
+and it is visibly worse — which the UI says out loud rather than hiding.
+
+---
+
 ## Module map
 
 ```
 shared/          @khoj/shared — imported by BOTH packages
   scoring-rules.ts   penalty constants and band thresholds
   types.ts           Trail, ScoredDay, Penalty, AdviceResponse
-  trails.ts          trail catalog loader + type
+  index.ts           barrel
 
-client/
-  embed.ts       EmbeddingGemma pipeline, WebGPU → WASM fallback
-  app.ts         UI state and render
-  sw.ts          service worker, offline forecast cache
+data/            committed JSON, no build step
+  trails.json        the catalog — adding a trail is a data-only change (FR8)
+  conditions.json    the observation corpus retrieval searches
 
-server/
-  index.ts       Hono app, CORS, routes
-  routes/advice.ts
-  routes/health.ts
+scripts/
+  seed-atlas.ts      embed the corpus, create the Atlas vector index
+  verify-trails.ts   G2 gate: retrieval non-empty for every trail
+  verify-retrieval.ts  semantic vs keyword, side by side
+
+client/src/
+  api.ts             fetch wrapper, the two-call advice flow
+  embed.ts           EmbeddingGemma pipeline, WebGPU → WASM fallback
+  offline.ts         last-fetched cache, read on failure
+  sw.ts              service worker, network-first for advice
+  App.tsx            UI state and render
+  components/        day-card, brief-panel, similar-panel
+
+server/src/
+  index.ts           Hono app, CORS, routes
+  routes/advice.ts   the orchestrator — every upstream, in order
+  routes/health.ts   liveness probe
   lib/scoring.ts     pure scoring functions
-  lib/weather.ts     Open-Meteo fetch + normalize
-  lib/atlas.ts       Mongo client, $vectorSearch
-  lib/serp.ts        SerpApi + cache
-  lib/brief.ts       Gemma 3 + rule fallback
+  lib/scorer.ts      pluggable Scorer registry (TabPFN slot kept open)
+  lib/data.ts        trail + corpus loaders, validated with zod
+  lib/weather.ts     Open-Meteo fetch + normalize + prior-rainfall
+  lib/atlas.ts       $vectorSearch + keyword fallback
+  lib/brief.ts       Gemma brief, grounded, never invents numbers
+  lib/conditions.ts  scored day → embeddable sentence (mirrored client-side)
   lib/voice.ts       ElevenLabs
-  lib/observability.ts  Sentry init + span helpers
-  lib/cache.ts       TTL wrapper
+  lib/serp.ts        SerpApi
+  lib/observability.ts  Sentry init + gen_ai.* span helpers
+  lib/cache.ts       two-tier TTL cache
+  lib/mongo.ts       lazy client
+  lib/config.ts      zod-validated env, every key defaulted
 ```
 
 ### Why `shared/` is source-only
@@ -199,5 +246,7 @@ It does **not** pretend to re-score. Refusing to silently show stale weather as 
 ## Technical debt, recorded honestly
 
 - **Scoring rules are hand-tuned constants, not calibrated.** The thresholds are plausible, not fitted to labelled outcomes. Calibrating them properly is the obvious next step and would need ground truth nobody has collected yet.
-- **The corpus is hand-seeded.** With six trails and a handful of observations each, retrieval quality is bounded by that size. It works; it is not robust.
-- **No CI beyond the keep-warm cron.** Tests run locally. Under a normal timeline there would be a test-and-lint workflow on push.
+- **The corpus is hand-seeded.** 24 records, four per trail. Retrieval quality is bounded by that size. It works; it is not robust.
+- **The mud penalty cannot see rain before the forecast window opens.** Open-Meteo returns a forward-looking window, so day 0 always scores zero prior rainfall. Fixing it needs a separate historical call per trail.
+- **Retrieval is scoped to one trail at a time.** The Atlas `$vectorSearch` filters by trail, so "days that felt like this *on this trail*" is what you get. A cross-trail search would be more interesting and would need a different index strategy.
+- **`conditionsText` is duplicated client- and server-side.** That is deliberate — the client must build the sentence to keep the text local — but it means the two copies can drift. There is a test pinning the server behaviour; the client copy is the one that could rot.

@@ -49,6 +49,23 @@ Gemma 3 then writes the spoken brief. It is **given** the score; it never comput
 
 No Python anywhere in the runtime. One language, end to end.
 
+## What is actually verified
+
+Rather than claim these work, they were run:
+
+| Claim | How it was checked | Result |
+|---|---|---|
+| Six trails score with visible penalties | Live request per trail | Babusar scores **NO (41)** on 2026-10-14 with `snowPenalty=35`; Daman-e-Koh stays **100** for the same forecast |
+| Elevation scales the snow penalty | Same forecast, two elevations | Non-zero at 3,800 m, null at 1,300 m |
+| EmbeddingGemma emits 768 dims | Model loaded and run | **768** — the Atlas `numDimensions` is correct |
+| Vector survives the base64 hop | 768 floats → 4,096 chars → decode | Exact, first element matches to 1e-7 |
+| Retrieval beats keyword search | Side-by-side, same queries | Muddy query: keyword returns unrelated Murree notes; embedding returns the three actually-muddy trails at **0.94 / 0.81 / 0.80** |
+| Retrieval is non-empty for all six trails | `npm run verify:trails` | **G2 PASS** |
+| Caching works | Two identical requests | `X-Cache: MISS` then `HIT` |
+| Error contract holds | Four bad requests | `UNKNOWN_TRAIL`, `INVALID_DAYS`, `INVALID_EMBEDDING` all correct |
+| Zero known vulnerabilities | `npm audit` | **0 vulnerabilities** |
+| Tests pass | `npm test` | **72 passed** |
+
 ## Quick start
 
 ```bash
@@ -64,15 +81,32 @@ npm run dev:client   # Vite on :5173, proxies /api → :3000
 
 ### Environment
 
-The app degrades gracefully. Only `MONGO_URI` is required.
+The app degrades gracefully. `MONGO_URI` is the only variable with real work to
+do; every other key has a defined fallback and the response says which path ran.
 
 | Variable | Required | If missing |
 |---|---|---|
-| `MONGO_URI` | yes | App will not start |
-| `GEMINI_API_KEY` | no | Falls back to a rule-based brief |
-| `SERPER_API_KEY` / `SERPAPI_KEY` | no | Live reports section hidden |
-| `ELEVENLABS_API_KEY` | no | Text brief only, no audio |
-| `SENTRY_DSN` | no | No traces |
+| `MONGO_URI` | for `$vectorSearch` + cross-restart cache | Keyword-match retrieval, in-memory cache |
+| `GEMINI_API_KEY` | no | Rule-based brief from the same numbers |
+| `ELEVENLABS_API_KEY` | no | Text brief, no audio |
+| `SERPAPI_KEY` | no | Live-reports section omitted entirely |
+| `SENTRY_DSN` | no | No `gen_ai.*` traces |
+| `PUBLIC_SITE_ORIGIN` | in production | CORS rejects the static site |
+
+The app **starts and serves** with an empty `.env`. That is deliberate — on a
+short deadline, a missing key must never mean a blank screen.
+
+### Verification scripts
+
+```bash
+npm run verify:trails      # G2: retrieval returns non-empty for all six trails
+npm run verify:retrieval   # semantic vs keyword retrieval, side by side
+npm run seed:atlas         # embed the corpus + create the Atlas vector index
+```
+
+`verify:trails` loads the real EmbeddingGemma model and asserts that each
+trail's own observation comes back first when used as its own query. It is a
+gate, not a demo: it exits non-zero if any trail retrieves nothing.
 
 ## Tests
 
@@ -80,7 +114,11 @@ The app degrades gracefully. Only `MONGO_URI` is required.
 npm test
 ```
 
-The scoring suite is the important one — it proves each penalty fires in isolation, which is what makes the score auditable.
+72 tests. The scoring suite is the important one — it proves each penalty fires
+in isolation and never fires below its threshold, which is what makes the score
+auditable. The rest cover the mud lookback window, the conditions text that both
+client and server must agree on, the rule-based brief, and the retrieval
+fallbacks.
 
 ## Docs
 
@@ -99,11 +137,28 @@ The scoring suite is the important one — it proves each penalty fires in isola
 
 Stated plainly, because they'd otherwise cost your trust:
 
-- The score is deterministic rules. The model does retrieval and narration only.
-- The observation corpus is small and hand-seeded; retrieval quality is bounded by its size.
-- Mountain forecasts are reanalysis-derived and are the hardest case for Open-Meteo.
-- Open-Meteo forecast skill degrades beyond ~10 days.
-- Live trail reports come from web search and coverage for Pakistani trails is thin.
+- **The score is deterministic rules.** The model does retrieval and narration
+  only. It never computes a score, and it is given one.
+- **The observation corpus is small and hand-seeded** — 24 records, four per
+  trail. Retrieval works; it is not robust, and its quality is bounded by that
+  size. Your own first-hand notes are worth more than anything generated here.
+- **The penalty thresholds are plausible, not calibrated.** Nobody has a
+  labelled dataset of "did this hike go well" for these trails.
+- **Mountain forecasts are reanalysis-derived** and are the hardest case for
+  Open-Meteo. Babusar at 3,800 m is the least reliable row in the app.
+- **Open-Meteo forecast skill degrades beyond ~10 days.** The 16-day view is
+  shown honestly, but it is a guess that far out and the UI should weight it
+  lower. It does not yet.
+- **Thunderstorms are not scored** (codes 95–99), because the source cannot
+  reliably derive them. Fine in October, wrong in July.
+- **The mud penalty cannot see rain before the forecast window opens.** Open-Meteo
+  returns a forward-looking window only, so day 0 has zero prior rainfall. This
+  is a real blind spot; retrieval partially recovers the qualitative picture.
+- **Live trail reports come from web search**, and SerpApi coverage of Pakistani
+  trails is thin. The section is omitted when empty rather than padded.
+- **Coordinates are unverified.** See the checklist in [PLAN.md](PLAN.md).
+- **Not yet done:** live deployment, the field trip, and the DEV post. See
+  [PLAN.md](PLAN.md) for the gates.
 
 ## License
 

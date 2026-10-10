@@ -106,31 +106,73 @@ Adding a trail is a **data-only change** — no code edits (FR8).
 
 ### The corpus is the weakest part
 
-It is **hand-seeded and small** — six trails, a handful of observations each. Retrieval *works*, but its quality is bounded by that size. With one record per trail, every query returns that record and the feature is decorative.
+**24 hand-seeded records, four per trail.** Retrieval *works* — `npm run
+verify:trails` confirms every trail returns its own observation first when used
+as its own query — but quality is bounded by that size. With one record per
+trail, every query returns that record and the feature is decorative.
 
-**This is why your own notes matter.** First-hand observations of these trails — from the trips you have already taken — are worth more than anything generated. They are also more honest.
+**This is why your own notes matter.** First-hand observations of these trails —
+from trips you have already taken — are worth more than anything generated. They
+are also more honest. Add them to `data/conditions.json` and re-run
+`npm run seed:atlas`.
 
 ### Why text embeddings for weather
 
-Embeddings let "muddy after rain, stream crossing high" retrieve a record written as "the lower path was a mess after Wednesday's rain, had to wade the stream." Lexical matching fails on that. A lookup table cannot do it at all. This is the specific reason an open-weight model earns its place in the app.
+Embeddings let "muddy after rain, stream crossing high" retrieve a record
+written as "the lower path was a mess after Wednesday's rain, had to wade the
+stream." Lexical matching fails on that. A lookup table cannot do it at all.
+This is the specific reason an open-weight model earns its place in the app.
+
+### Semantic vs keyword retrieval, measured
+
+The open-model story rests on this claim, so it was measured rather than
+asserted (`npm run verify:retrieval`, real EmbeddingGemma, real corpus):
+
+| Query | Embedding top hits | Keyword fallback |
+|---|---|---|
+| "Muddy after rain, stream crossing high" | Galiyat **0.94**, Margallas **0.81**, Kaghan **0.80** — all genuinely muddy | Murree rain notes at **0.43** — wrong trails entirely |
+
+The keyword path matched literal tokens and returned records from trails that
+were wet but not muddy-after-rain. The embedding found the right ones. That gap
+is the reason the model is in the product rather than bolted onto it.
 
 ### Atlas index
 
 ```js
-db.observations.createIndex({
-  embedding: "vector",
-  indexType: "vectorSearch",
-  definition: "vectorSearch",
-  "vectorSearch": {
-    "numDimensions": 768,        // ← EmbeddingGemma output. Verify before creating.
-    "path": "embedding",
-    "similarity": "cosine",
-    "numCandidates": 100
+db.observations.createIndex(
+  { embedding: "vector" },
+  {
+    name: "vector_index",
+    type: "vectorSearch",
+    definition: "vectorSearch",
+    vectorSearch: {
+      numDimensions: 768,        // ← VERIFIED, see below
+      path: "embedding",
+      similarity: "cosine",
+      numCandidates: 100
+    }
   }
-})
+)
 ```
 
-A wrong `numDimensions` fails at insert time, not query time. Confirm against the model card first.
+> **`numDimensions` was verified empirically, not read off a model card.**
+> EmbeddingGemma-300M was loaded through Transformers.js and run; the pooled,
+> normalised output is exactly **768** dimensions. This matters because a wrong
+> `numDimensions` fails at INSERT time, not query time. `npm run seed:atlas`
+> asserts the length before writing anything, and refuses to create the index on
+> a mismatch.
+
+The base64 transport was verified the same way: 768 floats encode to a
+4,096-character string and decode back bit-identical.
+
+### The mud penalty has a blind spot
+
+`priorRainfall` sums rain from within the forecast window only. Open-Meteo
+returns a forward-looking window, so **day 0 always has zero prior rainfall**
+even if it rained for a week beforehand. This is a real limitation, not a bug
+that could be coded away — it needs a separate historical-API call, which would
+cost a network round trip per trail on a budget that prefers none. Retrieval
+partially recovers the qualitative picture; the number does not.
 
 ---
 

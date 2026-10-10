@@ -20,6 +20,21 @@ Liveness probe for Render's health check and the keep-alive cron.
 
 ---
 
+## `GET /api/trails`
+
+The trail catalog. No query parameters.
+
+**Response `200`**
+
+```json
+{ "trails": [ /* the six trails from data/trails.json */ ] }
+```
+
+Adding a trail is a data-only change (FR8) — this endpoint reflects
+`data/trails.json` and nothing else.
+
+---
+
 ## `GET /api/advice`
 
 The main endpoint. Scores a trail over a date range.
@@ -136,11 +151,31 @@ GET /api/advice?trail=galiyat&days=7&embedding=AAAA...
 | 400 | `UNKNOWN_TRAIL` | `trail` is not in the catalog |
 | 400 | `INVALID_DAYS` | `days` outside 1–16 |
 | 400 | `INVALID_EMBEDDING` | Wrong length or not decodable |
+| 400 | `INVALID_QUERY` | Any other malformed query |
 | 429 | `RATE_LIMITED` | Too many uncached requests |
 | 503 | `WEATHER_UNAVAILABLE` | Open-Meteo failed — no score without weather |
+| 503 | `OFFLINE` | Emitted by the service worker when offline and nothing is cached |
 | 500 | `INTERNAL` | Anything else |
 
+All four error shapes have been exercised against the running server.
+
 **`WEATHER_UNAVAILABLE` is the only hard failure.** Everything else degrades: no key → feature omitted, upstream error → rule-based fallback. A trail app that shows a spinner because a narration service is down has failed at its one job.
+
+---
+
+## Verified behaviour
+
+Run against the live server, not asserted:
+
+| Case | Request | Result |
+|---|---|---|
+| Happy path | `?trail=daman-e-koh&days=7` | `200`, 7 scored days, penalties populated |
+| Elevation scaling | `?trail=babusar&days=16` | `NO` (41) on 2026-10-14, `snowPenalty=35` |
+| Cache miss then hit | same URL twice | `X-Cache: MISS` then `HIT` |
+| Unknown trail | `?trail=nandana` | `400 UNKNOWN_TRAIL` |
+| Bad window | `?trail=murree&days=99` | `400 INVALID_DAYS` |
+| Bad vector | `?trail=murree&embedding=AAAA` | `400 INVALID_EMBEDDING` |
+| Valid 768-vector | base64 Float32Array | accepted, used for `$vectorSearch` |
 
 ---
 
