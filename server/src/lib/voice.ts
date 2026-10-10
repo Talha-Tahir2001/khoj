@@ -13,44 +13,89 @@ import { noteOk, noteStatusFailure, reasonFor, shouldTry } from "./upstream.js";
 const VOICE_TIMEOUT_MS = 5000;
 
 /**
- * Readable explanations for the status codes that mean "this will never work
- * until billing changes". Silence here is what made a quota exhaustion
- * indistinguishable from a flaky network.
+ * How many candidate voices to probe before giving up.
+ *
+ * Three is enough: this account's first three library voices were all gated,
+ * and the fourth worked.
  */
-const VOICE_ERRORS: Record<string, string> = {
-    "401": "ElevenLabs rejected the API key.",
-    "402": "ElevenLabs free-tier quota exhausted — top up or the brief stays text-only.",
-    "403": "ElevenLabs denied access to this voice.",
-};
+const PROBE_LIMIT = 4;
 
 /**
- * ElevenLabs text-to-speech.
+ * Fallback candidates, tried in order when the configured voice is refused.
  *
- * Justified by one specific moment: you are in the car on the way to the trail
- * and you should not be reading. That is the whole case for this integration.
+ * Worth recording *why* this list exists, because the failure is deeply
+ * misleading: a free ElevenLabs plan cannot use **library voices** over the API
+ * at all, and it reports that as
  *
- * Returns null when the key is absent or the call fails — the brief text is
- * still useful, and audio is not load-bearing.
+ *     402 paid_plan_required
+ *     "Free users cannot use library voices via the API."
+ *
+ * which reads exactly like exhausted credits and is not. Several of these voice
+ * IDs are however reachable on a free tier, and the app finds one itself rather
+ * than making you diagnose your own account.
  */
-export async function narrate(config: Config, text: string): Promise<string | null> {
-    if (!hasElevenLabs(config)) return null;
+const FALLBACK_VOICE_IDS = [
+    "bIHbv24MWmeRgasZH58o", // Will — Relaxed Optimist
+    "EXAVITQu4vr4xnSDxMaL", // Sarah — Mature, Reassuring
+    "pNInz6obpgDQGcFmaJgB", // Adam — Dominant, Firm
+    "jBqdMUZWMYHZHUpQvB9L", // Sara — Calm, Narrator
+];
+
+let resolvedVoiceId: string | null = null;
+
+/** Clear the memoised voice. Test seam. */
+export function resetVoice(): void {
+    resolvedVoiceId = null;
+}
+
+/**
+ * Pick a voice the current plan can actually use.
+ *
+ * Tries the configured voice first, then probes known-good fallbacks. The result
+ * is memoised for the process, so this costs one request at most per voice
+ * rather than one per synthesis.
+ */
+async function resolveVoice(config: Config): Promise<string | null> {
+    if (resolvedVoiceId) return resolvedVoiceId;
     if (!shouldTry("elevenlabs")) return null;
 
+    const candidates = [config.ELEVENLABS_VOICE_ID, ...FALLBACK_VOICE_IDS]
+        .filter((id, i, all) => id && all.indexOf(id) === i)
+        .slice(0, PROBE_LIMIT);
+
+    for (const voiceId of candidates) {
+        const result = await synthesize(config, voiceId, "test");
+        if (result) {
+            if (voiceId !== config.ELEVENLABS_VOICE_ID) {
+                console.log(
+                    `[khoj] ElevenLabs voice ${voiceId} works on this plan; ` +
+                        `the configured ${config.ELEVENLABS_VOICE_ID} is library-gated.`,
+                );
+            }
+            resolvedVoiceId = voiceId;
+            return voiceId;
+        }
+    }
+    return null;
+}
+
+/** One synthesis attempt. Returns null on any failure, never throws. */
+async function synthesize(
+    config: Config,
+    voiceId: string,
+    text: string,
+): Promise<string | null> {
     try {
         const { ElevenLabsClient } = await import("@elevenlabs/elevenlabs-js");
         const client = new ElevenLabsClient({ apiKey: config.ELEVENLABS_API_KEY });
 
         const response = await client.textToSpeech.convert(
-            config.ELEVENLABS_VOICE_ID,
-            {
-                text,
-                modelId: config.ELEVENLABS_MODEL_ID,
-                outputFormat: "mp3_44100_128",
-            },
-            // A per-request deadline and abort signal, so a slow synthesis is bounded at
-            // the socket rather than merely no longer awaited. Retries are OFF:
-            // a billing failure is deterministic, and the SDK's default of two
-            // attempts doubled the worst case for no possible benefit.
+            voiceId,
+            { text, modelId: config.ELEVENLABS_MODEL_ID, outputFormat: "mp3_44100_128" },
+            // A per-request deadline and abort signal, so a slow synthesis is
+            // bounded at the socket rather than merely no longer awaited. Retries
+            // are OFF: a plan restriction is deterministic and the SDK's default
+            // of two attempts doubled the worst case for no possible benefit.
             {
                 timeoutInSeconds: VOICE_TIMEOUT_MS / 1000,
                 maxRetries: 0,
@@ -59,30 +104,48 @@ export async function narrate(config: Config, text: string): Promise<string | nu
         );
 
         const bytes = await readAll(response);
-        if (bytes.length === 0) return null;
-
-        noteOk("elevenlabs");
-
-        // Served as a data URL so the client needs no second request, and so the
-        // audio survives with the offline cache alongside the brief.
-        return `data:audio/mpeg;base64,${Buffer.from(bytes).toString("base64")}`;
-    } catch (err) {
-        const status = httpStatus(err);
-        noteStatusFailure(
-            "elevenlabs",
-            status ?? 0,
-            status
-                ? (VOICE_ERRORS[String(status)] ?? `ElevenLabs returned HTTP ${status}.`)
-                : "ElevenLabs is unreachable right now.",
-        );
+        return bytes.length === 0 ? null : Buffer.from(bytes).toString("base64");
+    } catch {
         return null;
     }
 }
 
-/** Pull an HTTP status out of whatever the SDK threw. */
-function httpStatus(err: unknown): number | null {
-    const e = err as { statusCode?: number; status?: number; response?: { status?: number } };
-    return e?.statusCode ?? e?.status ?? e?.response?.status ?? null;
+export async function narrate(config: Config, text: string): Promise<string | null> {
+    if (!hasElevenLabs(config) || !shouldTry("elevenlabs")) return null;
+
+    const cached = resolvedVoiceId;
+    if (cached) {
+        const direct = await synthesize(config, cached, text);
+        if (direct) {
+            noteOk("elevenlabs");
+            return `data:audio/mpeg;base64,${direct}`;
+        }
+        // The voice stopped working — re-probe rather than failing outright.
+        resolvedVoiceId = null;
+    }
+
+    // A "test" probe doubles as the real synthesis when nothing is cached, so
+    // the common path costs exactly one request.
+    const voiceId = await resolveVoice(config);
+    if (!voiceId) {
+        noteStatusFailure(
+            "elevenlabs",
+            402,
+            "No voice on this plan is available via the API. " +
+                "Free tiers cannot use ElevenLabs library voices — either " +
+                "clone a voice or upgrade.",
+        );
+        return null;
+    }
+
+    const audio = await synthesize(config, voiceId, text);
+    if (!audio) {
+        noteStatusFailure("elevenlabs", 0, "ElevenLabs synthesis failed.");
+        return null;
+    }
+
+    noteOk("elevenlabs");
+    return `data:audio/mpeg;base64,${audio}`;
 }
 
 /** Why audio is missing, or undefined if it simply was not configured. */

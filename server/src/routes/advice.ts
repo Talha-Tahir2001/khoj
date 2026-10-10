@@ -271,7 +271,7 @@ async function buildAdvice(
             meta: {
                 cached: weatherCached,
                 generated_at: new Date().toISOString(),
-                model: brief.source === "gemma" ? config.GEMINI_MODEL : undefined,
+                model: brief.model,
                 degraded,
                 ...(degraded ? { reasons } : {}),
             },

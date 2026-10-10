@@ -16,9 +16,22 @@ const schema = z.object({
     OPEN_METHO_BASE_URL: z.string().url().default("https://api.open-meteo.com/v1"),
 
     GEMINI_API_KEY: z.string().optional(),
+    /**
+     * Base URL for the Gemini REST API.
+     *
+     * Defaults to AI Studio. Point it at
+     *   https://<location>-aiplatform.googleapis.com/v1/projects/<project>/locations/<location>
+     * for Vertex AI, or at any gateway in front of either. That is why the brief
+     * layer calls the endpoint directly instead of using @google/genai — the SDK
+     * fixes the base URL and adds retries we do not control.
+     */
+    GEMINI_BASE_URL: z
+        .string()
+        .url()
+        .default("https://generativelanguage.googleapis.com/v1beta"),
     GOOGLE_CLOUD_PROJECT: z.string().optional(),
     GOOGLE_CLOUD_LOCATION: z.string().default("us-central1"),
-    GEMINI_MODEL: z.string().default("gemini-2.0-flash"),
+    GEMINI_MODEL: z.string().default("gemma-4-31b-it"),
     GEMINI_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
     GEMINI_ENABLED: z
         .string()

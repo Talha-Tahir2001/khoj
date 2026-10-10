@@ -58,9 +58,18 @@ export interface AdviceResponse {
     }>;
     brief: {
         text: string;
-        source: "gemma" | "rule";
-        audio_url?: string;
-        /** Why the brief is rule-based, when it is. Null when the model wrote it. */
+        /**
+         * Which layer wrote it.
+         *
+         * `"gemma"` is an open-weight `gemma-*` model, `"gemini"` is a hosted
+         * one, `"rule"` is the deterministic fallback. The distinction is not
+         * cosmetic: the open-weight case is the stronger claim and the UI should
+         * be able to tell a user which one they got.
+         */
+        source: "gemma" | "gemini" | "rule";
+        /** The model id, when a model actually wrote it. */
+        model?: string;
+        /** Why the brief is rule-based, when it is. */
         reason?: string | null;
     };
     live_reports: Array<{

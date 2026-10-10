@@ -24,27 +24,22 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
  * presenting a template as model output would undermine the one thing this tool
  * is asking for.
  */
-export function BriefPanel({
-  brief,
-  trailName,
-}: {
-  brief: AdviceResponse["brief"]
-  trailName: string
-}) {
+export function BriefPanel({ brief }: { brief: AdviceResponse["brief"] }) {
   const [playing, setPlaying] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
-  const cacheRef = useRef<string | null>(brief.audio_url ?? null)
+  // Audio is fetched once per brief and reused on repeat plays. Reset when the
+  // brief itself changes, so a stale clip is never attached to new text.
+  const cacheRef = useRef<string | null>(null)
 
-  // A new brief invalidates any audio already fetched for the old one.
   useEffect(() => {
     audioRef.current?.pause()
     audioRef.current = null
-    cacheRef.current = brief.audio_url ?? null
+    cacheRef.current = null
     setPlaying(false)
     setError(null)
-  }, [brief.text, brief.audio_url])
+  }, [brief.text])
 
   const toggle = async () => {
     if (playing) {
@@ -89,7 +84,10 @@ export function BriefPanel({
     )
   }
 
-  const canPlay = Boolean(brief.audio_url) || !isKnownUnavailable(brief.reason)
+  // Hide the button only when we already know speech is impossible for this
+  // deployment. Otherwise offer it: the reason may not be known until the first
+  // attempt, and the server probes for a usable voice on its own.
+  const canPlay = !isKnownUnavailable(brief.reason)
 
   return (
     <Card className="gap-0 border-border/70 py-0">
@@ -118,17 +116,26 @@ export function BriefPanel({
         <p className="leading-relaxed">{brief.text}</p>
 
         <p className="mt-3 flex items-start gap-1.5 text-xs text-muted-foreground">
-          {brief.source === "gemma" ? (
-            <>
-              <IconVolume size={13} className="mt-0.5 shrink-0" />
-              Written by the {trailName} briefing model, given the score above
-              rather than computing it.
-            </>
-          ) : (
+          {brief.source === "rule" ? (
             <>
               <IconVolumeOff size={13} className="mt-0.5 shrink-0" />
               Rule-based brief — the narration model is not available. Same
               numbers, no prose. The score is unchanged.
+            </>
+          ) : brief.source === "gemma" ? (
+            <>
+              <IconVolume size={13} className="mt-0.5 shrink-0" />
+              Written by{" "}
+              <span className="font-medium text-foreground">{brief.model}</span>{" "}
+              — an open-weight Gemma model. Given the score above rather than
+              computing it.
+            </>
+          ) : (
+            <>
+              <IconVolume size={13} className="mt-0.5 shrink-0" />
+              Written by{" "}
+              <span className="font-medium text-foreground">{brief.model}</span>
+              , given the score above rather than computing it.
             </>
           )}
         </p>

@@ -112,6 +112,63 @@ and it is visibly worse — which the UI says out loud rather than hiding.
 
 ---
 
+### Two upstream traps worth writing down
+
+Both of these cost real debugging time and neither produces an error that points
+at itself.
+
+**ElevenLabs `402` does not mean out of credits.** A free plan cannot use the
+premade *library* voices over the API at all, and reports it as:
+
+```
+402 paid_plan_required
+"Free users cannot use library voices via the API."
+```
+
+That is a plan restriction, not a billing one, and it reads exactly like a
+quota exhaustion. The app now probes known free-tier-usable voices on first use
+and falls back automatically, memoising the winner for the process.
+
+**A Gemini `402` names a *project*, not a key.** "Prepayment credits are
+depleted" refers to whichever Google project that base URL bills against — not
+necessarily the key being dead. The same key can authenticate fine (the models
+list endpoint is free) while `generateContent` is blocked. Pointing
+`GEMINI_BASE_URL` at a Vertex project or a gateway changes which project is
+billed.
+
+---
+
+## Calling the Gemini endpoint directly
+
+The brief layer uses `fetch` against the REST API rather than `@google/genai`,
+for reasons that only surfaced by measuring:
+
+1. **The SDK retries silently.** It turned a 1.2 s billing rejection into a 3 s
+   wait. A plan or quota failure is deterministic; asking twice cannot change
+   the answer.
+2. **Explicit timeout.** One `AbortSignal` we control, rather than a per-retry
+   timeout the SDK composes behind our back.
+3. **A configurable base URL.** Vertex AI and AI Studio are different endpoint
+   *shapes*, not just different hosts. `GEMINI_BASE_URL` covers both, plus any
+   gateway in front of them.
+
+Auth goes in the `x-goog-api-key` header rather than `?key=`, so the credential
+does not end up in a URL, an access log, or a referrer header.
+
+### Open-weight vs hosted
+
+`GEMINI_MODEL` defaults to `gemma-4-31b-it`, falling back to
+`gemma-4-26b-a4b-it`. That is deliberate and not cosmetic: an open-weight
+`gemma-*` id is the same family as the EmbeddingGemma running client-side,
+whereas `gemini-*` is a hosted model wearing the name. The response reports
+which model actually wrote the brief, and the UI shows it — a user should never
+have to guess whether a model produced the text they are reading.
+
+Gemma 4 emits reasoning parts flagged `thought: true`. Those are filtered out:
+concatenating them would put raw reasoning prose in front of the user.
+
+---
+
 ## Module map
 
 ```

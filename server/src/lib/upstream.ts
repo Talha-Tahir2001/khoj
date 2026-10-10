@@ -14,7 +14,7 @@
  *    blip. The reason is now carried through to the UI.
  */
 
-export type Upstream = "gemini" | "elevenlabs" | "serpapi" | "atlas";
+export type Upstream = "gemma" | "elevenlabs" | "serpapi" | "atlas";
 
 export type UpstreamStatus = "unknown" | "ok" | "failed";
 

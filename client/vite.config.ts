@@ -54,6 +54,13 @@ function sentryDsnPlugin(): Plugin {
     };
 }
 
+const apiProxy = {
+    "/api": {
+        target: `http://localhost:${process.env.PORT ?? 3000}`,
+        changeOrigin: true,
+    },
+};
+
 export default defineConfig({
     plugins: [react(), tailwindcss(), sentryDsnPlugin(), serviceWorker()],
     resolve: {
@@ -64,12 +71,14 @@ export default defineConfig({
     server: {
         // The API runs on :3000. Proxying keeps the browser same-origin in dev, so
         // CORS behaves the same locally as it does on the deployed Static Site.
-        proxy: {
-            "/api": {
-                target: `http://localhost:${process.env.PORT ?? 3000}`,
-                changeOrigin: true,
-            },
-        },
+        proxy: apiProxy,
+    },
+    preview: {
+        // Same reason, and it matters for verification: `npm run preview` serves
+        // the real build, so testing the built artefact locally is only possible
+        // if /api resolves. Without this every request 404s and it looks like a
+        // frontend bug rather than a missing proxy.
+        proxy: apiProxy,
     },
     build: {
         target: "es2022",

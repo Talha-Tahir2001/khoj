@@ -88,6 +88,7 @@ do; every other key has a defined fallback and the response says which path ran.
 |---|---|---|
 | `MONGO_URI` | for `$vectorSearch` + cross-restart cache | Keyword-match retrieval, in-memory cache |
 | `GEMINI_API_KEY` | no | Rule-based brief from the same numbers |
+| `GEMINI_BASE_URL` | no | Defaults to AI Studio; set for Vertex or a gateway |
 | `ELEVENLABS_API_KEY` | no | Text brief, no audio |
 | `SERPAPI_KEY` | no | Live-reports section omitted entirely |
 | `SENTRY_DSN` | no | No `gen_ai.*` traces |
@@ -95,6 +96,19 @@ do; every other key has a defined fallback and the response says which path ran.
 
 The app **starts and serves** with an empty `.env`. That is deliberate — on a
 short deadline, a missing key must never mean a blank screen.
+
+### Two errors that do not mean what they say
+
+**ElevenLabs `402` is a plan restriction, not a billing one.** Free plans cannot
+use the premade library voices over the API, and it reports that as
+`paid_plan_required: "Free users cannot use library voices via the API"` — which
+reads exactly like exhausted credits. The app probes for a voice your tier can
+actually use and falls back on its own.
+
+**A Gemini `402` names a project, not a key.** "Prepayment credits are depleted"
+applies to whichever Google project the base URL bills against. The same key can
+authenticate fine — the models list endpoint is free — while `generateContent` is
+blocked. Changing `GEMINI_BASE_URL` changes which project is billed.
 
 ### Verification scripts
 

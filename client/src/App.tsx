@@ -195,7 +195,7 @@ export function App() {
 
         {advice ? (
           <>
-            <BriefPanel brief={advice.brief} trailName={advice.trail.name} />
+            <BriefPanel brief={advice.brief} />
             <BestDay days={advice.days} trailName={advice.trail.name} />
             <section className="mt-6 space-y-3">
               {advice.days.map((d) => (

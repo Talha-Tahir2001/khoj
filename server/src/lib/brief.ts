@@ -1,9 +1,8 @@
 import type { ScoredDay, Trail } from "@khoj/shared/types";
 import type { Config } from "./config.js";
 import { hasGemma } from "./config.js";
-import { noteFailure, noteOk, noteStatusFailure, reasonFor, shouldTry } from "./upstream.js";
+import { noteOk, noteStatusFailure, reasonFor, shouldTry } from "./upstream.js";
 import type { SimilarCondition } from "./atlas.js";
-import { withChatSpan } from "./observability.js";
 import type * as Sentry from "@sentry/node";
 
 export interface BriefInput {
@@ -15,8 +14,10 @@ export interface BriefInput {
 
 export interface Brief {
     text: string;
-    source: "gemma" | "rule";
-    audio_url?: string;
+    source: "gemma" | "gemini" | "rule";
+    model?: string;
+    /** Why the brief is rule-based, when it is. */
+    reason?: string | null;
 }
 
 const SYSTEM_PROMPT = [
@@ -29,11 +30,52 @@ const SYSTEM_PROMPT = [
 ].join(" ");
 
 /**
+ * Fallback open-weight Gemma ids.
+ *
+ * These are the models that make the challenge claim unambiguous: the same
+ * family as the EmbeddingGemma running client-side, not just a Gemini model
+ * wearing the name. Tried in order after the configured model.
+ */
+const GEMMA_FALLBACK_MODEL_IDS = ["gemma-4-31b-it", "gemma-4-26b-a4b-it"];
+
+/** Shape of the subset of the Gemini REST response we rely on. */
+interface GeminiResponse {
+    candidates?: {
+        content?: { parts?: { text?: string; thought?: boolean }[] };
+        finishReason?: string;
+    }[];
+    promptFeedback?: { blockReason?: string };
+    error?: { message?: string; status?: string };
+}
+
+class GeminiError extends Error {
+    constructor(
+        readonly status: number,
+        message: string,
+    ) {
+        super(message);
+    }
+}
+
+/**
  * Produce the spoken brief.
  *
- * The model is GIVEN the score (FR4). If the key is missing or the call fails,
- * the rule fallback produces a brief from the same numbers — labelled `"rule"`
- * so the UI never presents a template as model output.
+ * Called directly over REST rather than through @google/genai, for three
+ * reasons that all showed up in practice:
+ *
+ *  1. **The SDK retries silently.** It turned a 1.2 s billing rejection into a
+ *     3 s wait, and the brief is the largest single contributor to response
+ *     time after weather. A plan or quota failure is deterministic; asking
+ *     twice cannot change the answer.
+ *  2. **Explicit timeout.** One AbortSignal we control, rather than a per-retry
+ *     timeout the SDK composes on our behalf.
+ *  3. **A configurable base URL.** Vertex AI and AI Studio are different
+ *     endpoints with different auth shapes. One env var covers both, and
+ *     anything in front of them.
+ *
+ * If the key is missing or the call fails, the rule fallback produces a brief
+ * from the same numbers — labelled so the UI never presents a template as model
+ * output.
  */
 export async function generateBrief(
     config: Config,
@@ -41,81 +83,141 @@ export async function generateBrief(
     parentSpan: Sentry.Span | null,
     conversationId: string,
 ): Promise<Brief> {
-    if (!hasGemma(config) || !shouldTry("gemini")) {
-        return { text: ruleBrief(input), source: "rule" };
+    if (!hasGemma(config) || !shouldTry("gemma")) {
+        return {
+            text: ruleBrief(input),
+            source: "rule",
+            reason: briefUnavailableReason() ?? "Briefing model not configured.",
+        };
     }
 
-    try {
-        const { GoogleGenAI } = await import("@google/genai");
-        const ai = new GoogleGenAI({ apiKey: config.GEMINI_API_KEY });
-        const prompt = composePrompt(input);
+    const prompt = composePrompt(input);
+    let lastStatus = 0;
+    let lastMessage = "";
 
-        const { result } = await withChatSpan(
-            parentSpan,
-            {
-                model: config.GEMINI_MODEL,
-                conversationId,
-                prompt,
-                promptPreview: input.day.date,
-            },
-            () =>
-                ai.models.generateContent({
-                    model: config.GEMINI_MODEL,
-                    contents: prompt,
-                    // Retries are disabled deliberately. The SDK retries on its
-                    // own, which turned a 1.2 s rejection into a 3 s wait — and
-                    // the brief is the largest single contributor to response
-                    // time after weather. A billing failure is deterministic;
-                    // asking twice cannot change the answer.
-                    config: {
-                        systemInstruction: SYSTEM_PROMPT,
-                        maxOutputTokens: 200,
-                        temperature: 0.6,
-                        abortSignal: AbortSignal.timeout(config.GEMINI_TIMEOUT_MS),
-                    },
-                }),
-        );
+    for (const modelId of modelChain(config)) {
+        try {
+            const raw = await callGemini(config, modelId, prompt);
+            return {
+                text: trimToSentences(raw, 3),
+                source: modelId.startsWith("gemma-") ? "gemma" : "gemini",
+                model: modelId,
+                reason: null,
+            };
+        } catch (err) {
+            lastStatus = err instanceof GeminiError ? err.status : 0;
+            lastMessage = err instanceof Error ? err.message : String(err);
 
-        const text = result.text?.trim();
-        if (!text) {
-            noteFailure("gemini", "The briefing model returned nothing.");
-            return { text: ruleBrief(input), source: "rule" };
+            // Deterministic failures — bad key, no plan, no quota — will not be
+            // fixed by trying the next model. Stop.
+            if (lastStatus === 401 || lastStatus === 402 || lastStatus === 403) break;
         }
-
-        noteOk("gemini");
-        return { text: trimToSentences(text, 3), source: "gemma" };
-    } catch (err) {
-        const status = httpStatus(err);
-        noteStatusFailure(
-            "gemini",
-            status ?? 0,
-            status === 404
-                ? `"${config.GEMINI_MODEL}" is not available on this key.`
-                : status
-                  ? (GEMINI_ERRORS[String(status)] ?? `Briefing model returned HTTP ${status}.`)
-                  : "The briefing model is unreachable right now.",
-        );
-        return { text: ruleBrief(input), source: "rule" };
     }
+
+    const reason = classify(lastStatus, lastMessage);
+    noteStatusFailure("gemma", lastStatus, reason);
+
+    return { text: ruleBrief(input), source: "rule", reason };
 }
 
 /**
- * Status codes worth naming plainly. A billing failure and a network blip look
- * identical in a response unless the app says which it was.
+ * The brief should say which model actually wrote it, in plain language.
+ *
+ * The distinction matters for the challenge: an open-weight `gemma-*` id is a
+ * materially stronger claim than `gemini-*`, and the response should not blur
+ * the two.
  */
-const GEMINI_ERRORS: Record<string, string> = {
-    "401": "Gemini rejected the API key.",
-    "402": "Gemini API credits are exhausted — the brief falls back to rules.",
-    "403": "Gemini denied access to this model.",
-};
+function modelChain(config: Config): string[] {
+    const chain = [config.GEMINI_MODEL, ...GEMMA_FALLBACK_MODEL_IDS];
+    return chain.filter((id, i) => id && chain.indexOf(id) === i);
+}
+
+/**
+ * One REST call.
+ *
+ * Uses `x-goog-api-key` rather than `?key=` so the credential does not end up
+ * in a URL, an access log, or a referrer header.
+ */
+async function callGemini(config: Config, modelId: string, prompt: string): Promise<string> {
+    const url = `${config.GEMINI_BASE_URL.replace(/\/$/, "")}/models/${modelId}:generateContent`;
+
+    const response = await fetch(url, {
+        method: "POST",
+        headers: {
+            "x-goog-api-key": config.GEMINI_API_KEY!,
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+            systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            generationConfig: {
+                temperature: 0.6,
+                maxOutputTokens: 200,
+            },
+        }),
+        signal: AbortSignal.timeout(config.GEMINI_TIMEOUT_MS),
+    });
+
+    const payload = (await response.json().catch(() => ({}))) as GeminiResponse;
+
+    if (!response.ok) {
+        throw new GeminiError(
+            response.status,
+            payload.error?.message ?? `HTTP ${response.status}`,
+        );
+    }
+
+    const blocked = payload.promptFeedback?.blockReason;
+    if (blocked) {
+        throw new GeminiError(422, `refused the prompt (blockReason: ${blocked})`);
+    }
+
+    const text = (payload.candidates?.[0]?.content?.parts ?? [])
+        // Gemma 4 emits reasoning parts flagged `thought: true`. Those are not
+        // the answer, and concatenating them would put reasoning prose in front
+        // of the user.
+        .filter((part) => part.thought !== true)
+        .map((part) => part.text ?? "")
+        .join("")
+        .trim();
+
+    if (!text) {
+        throw new GeminiError(
+            502,
+            `no text returned (finishReason: ${payload.candidates?.[0]?.finishReason ?? "unknown"})`,
+        );
+    }
+
+    return text;
+}
+
+/**
+ * Turn an HTTP status into a sentence a user can act on.
+ *
+ * A bare "brief failed" is undiagnosable. Billing, permissions, a bad model id
+ * and a network blip each need a completely different response.
+ */
+function classify(status: number, message = ""): string {
+    switch (status) {
+        case 401:
+            return "Gemini rejected the API key.";
+        case 402:
+            return "Gemini API credits are exhausted — the brief falls back to rules.";
+        case 403:
+            return "Gemini denied access to this model on this key.";
+        case 404:
+            return "The configured model is not available on this key.";
+        case 422:
+            return "The briefing model refused the request.";
+        default:
+            return status === 0
+                ? "The briefing model is unreachable right now."
+                : `The briefing model returned HTTP ${status}${message ? ` — ${message}` : ""}.`;
+    }
+}
 
 /** Why the brief is rule-based, when it is. */
-export const briefUnavailableReason = (): string | undefined => reasonFor("gemini");
-
-function httpStatus(err: unknown): number | null {
-    const e = err as { status?: number; code?: number; response?: { status?: number } };
-    return e?.status ?? e?.code ?? e?.response?.status ?? null;
-}
+export const briefUnavailableReason = (): string | undefined => reasonFor("gemma");
 
 function composePrompt({ trail, day, similar, live_reports }: BriefInput): string {
     const lines: string[] = [];
@@ -198,7 +300,9 @@ export function ruleBrief({ trail, day, similar }: BriefInput): string {
     }
 
     // 2. The conditions, always. These are the numbers the score was built from.
-    sentences.push(`High of ${Math.round(day.tmax_c)}°C with wind to ${Math.round(day.wind_max_kmh)} km/h.`);
+    sentences.push(
+        `High of ${Math.round(day.tmax_c)}°C with wind to ${Math.round(day.wind_max_kmh)} km/h.`,
+    );
 
     // 3. The real-world comparison, when retrieval found one.
     if (similar.length > 0) {
