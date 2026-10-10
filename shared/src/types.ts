@@ -60,6 +60,8 @@ export interface AdviceResponse {
         text: string;
         source: "gemma" | "rule";
         audio_url?: string;
+        /** Why the brief is rule-based, when it is. Null when the model wrote it. */
+        reason?: string | null;
     };
     live_reports: Array<{
         title: string;
@@ -72,5 +74,11 @@ export interface AdviceResponse {
         generated_at: string;
         model?: string;
         degraded: boolean;
+        /**
+         * Why the response is degraded, per upstream. Absent when everything
+         * worked. `degraded: true` with no explanation is useless — a quota
+         * exhaustion and a flaky network need completely different responses.
+         */
+        reasons?: Record<string, string>;
     };
 }

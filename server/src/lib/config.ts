@@ -51,6 +51,30 @@ export type Config = z.infer<typeof schema>;
 
 let cached: Config | null = null;
 
+/**
+ * A URI containing an unresolved `<placeholder>` is the single most likely
+ * first-run mistake, and it fails silently: the server starts, logs that it is
+ * degraded, and quietly serves keyword search forever. Catch it at the door.
+ */
+export function assertNoPlaceholders(config: Config): void {
+    const problems: string[] = [];
+
+    for (const key of ["MONGO_URI"] as const) {
+        const value = config[key];
+        if (value && /<[^>]+>/.test(value)) {
+            problems.push(
+                `${key} still contains a <placeholder>. Copy the real value — for Atlas, ` +
+                    `Connect → Drivers — and replace <cluster> and <password>.`,
+            );
+        }
+    }
+
+    if (problems.length > 0) {
+        console.error(`[khoj] refusing to start with unresolved placeholders:\n  - ${problems.join("\n  - ")}`);
+        process.exit(1);
+    }
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     if (cached) return cached;
     const parsed = schema.safeParse(env);

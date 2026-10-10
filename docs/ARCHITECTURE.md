@@ -185,13 +185,65 @@ Every external dependency has a defined failure mode. The app is never left spin
 | Failure | Behavior |
 |---|---|
 | No `GEMINI_API_KEY` | Rule-based brief from the same score |
-| Gemma call fails | Same fallback, tagged `"source": "rule"` in the response |
+| Gemma call fails | Same fallback, with the reason in `meta.reasons.brief` |
 | No `SERPAPI_KEY` | Live reports section omitted entirely |
 | SerpApi returns nothing | Section omitted — honest, not faked |
 | Atlas unreachable | Retrieval returns empty; score and brief still render |
-| Open-Meteo fails | 503 with a clear message — the only hard failure, since there is no score without weather |
+| Open-Meteo fails | 503 — the only hard failure, since there is no score without weather |
+| Any upstream > 20 s | 504 rather than hanging |
+| Voice unavailable | Brief is text-only; reason in `meta.reasons.audio` |
 
 The response always carries a `source` field per generated segment, so the UI can label a rule-based brief as such. A fallback presented as if it were model output would be dishonest.
+
+### `meta.reasons` — why, not just that
+
+`degraded: true` on its own is undiagnosable. A quota exhaustion and a network
+blip need completely different responses from whoever is reading it, so each
+degradation carries a sentence:
+
+```json
+"reasons": {
+  "brief": "Gemini API credits are exhausted — the brief falls back to rules.",
+  "audio": "ElevenLabs free-tier quota exhausted — top up or the brief stays text-only."
+}
+```
+
+### Circuit breakers
+
+A service returning 402 or 401 will never start working by being asked again.
+Retrying it per request added latency to every call and produced exactly the
+outbound-traffic pattern Render may suspend a free instance for.
+
+- **Hard failures** (401/402/403) trip the breaker on the **first** occurrence.
+  They are deterministic; a second attempt cannot change the answer.
+- **Transient failures** (timeouts, 5xx) get two strikes, so a brief blip does
+  not permanently disable a feature.
+- A 5-minute cool-off, then one half-open attempt to test the water.
+
+Measured effect on this project: cold request **25 s → 5.9 s**, warm
+**322 ms**. Without it, every request paid the full timeout forever.
+
+### Timeouts
+
+Atlas is optional, so it must never be able to hang a request.
+`serverSelectionTimeoutMS` bounds server *selection* but does **not** reliably
+bound the SRV DNS lookup — a stalled resolver sits far past it. That produced a
+31-second hang before any timeout applied.
+
+| Bound | Value |
+|---|---|
+| Atlas operation | 4 s |
+| Speech synthesis | 5 s, retries **off** |
+| SerpApi | 12 s |
+| Gemma | 10 s |
+| Whole request | 20 s → 504 |
+
+SDK-level retries are disabled. Both the ElevenLabs and Google SDKs retry on
+their own, which turned a 660 ms rejection into a 17 s wait.
+
+`Server-Timing` breaks the request down per stage, so a slow response can be
+attributed without attaching a debugger — and it produces the latency table the
+write-up needs.
 
 ## Sentry span structure
 

@@ -20,6 +20,33 @@ Liveness probe for Render's health check and the keep-alive cron.
 
 ---
 
+## `GET /api/voice`
+
+Speech for the brief, **fetched on demand**.
+
+Query: `text` — the brief, 1–600 characters.
+
+**Response `200`**
+
+```json
+{ "audio_url": "data:audio/mpeg;base64,T2dQ..." }
+```
+
+| Status | `code` | When |
+|---|---|---|
+| 400 | `INVALID_TEXT` | `text` missing or over 600 chars |
+| 503 | `VOICE_UNAVAILABLE` | Not configured, quota exhausted, or synthesis failed. The message says which. |
+
+> **Why this is not inline on `/api/advice`.** Synthesis took 660 ms when it
+> worked and over 20 s when it did not. Blocking a driving decision on audio —
+> a feature the user has to press play to use — made the whole app slow. The
+> verdict now arrives first; audio arrives when asked for.
+>
+> This was found by measurement, not assumed: `Server-Timing` on `/api/advice`
+> showed `voice;dur=21351`.
+
+---
+
 ## `GET /api/trails`
 
 The trail catalog. No query parameters.

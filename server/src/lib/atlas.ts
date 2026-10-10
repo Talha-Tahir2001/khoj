@@ -1,6 +1,15 @@
 import type { Db } from "mongodb";
 import type { ConditionObservation, Trail } from "@khoj/shared/types";
 import type { Config } from "./config.js";
+import {
+    atlasAvailable,
+    noteAtlasFailure,
+    noteAtlasSuccess,
+    withTimeout,
+} from "./mongo.js";
+
+/** Ceiling on the Atlas query. Past this, keyword search answers instead. */
+const ATLAS_TIMEOUT_MS = 4000;
 
 /**
  * EmbeddingGemma-300M emits 768 dimensions.
@@ -162,12 +171,24 @@ export async function retrieveSimilar(
     observations: ConditionObservation[],
     opts: { trail: Trail; text: string; vector?: number[] },
 ): Promise<{ results: SimilarCondition[]; source: "atlas" | "keyword" }> {
-    if (db && opts.vector && isValidVector(opts.vector)) {
+    if (db && opts.vector && isValidVector(opts.vector) && atlasAvailable()) {
         try {
-            const hits = await vectorSearch(db, opts.vector, { trail: opts.trail.id });
-            if (hits.length > 0) return { results: hits, source: "atlas" };
+            // Bounded: a slow cluster must degrade to keyword search rather than
+            // hold the request open. Atlas is an enhancement here, not a
+            // dependency — the corpus is small enough to search locally.
+            const hits = await withTimeout(
+                vectorSearch(db, opts.vector, { trail: opts.trail.id }),
+                ATLAS_TIMEOUT_MS,
+                () => [] as SimilarCondition[],
+            );
+            if (hits.length > 0) {
+                noteAtlasSuccess();
+                return { results: hits, source: "atlas" };
+            }
+            noteAtlasSuccess();
         } catch {
             // Fall through. Atlas being down is not a reason to fail the request.
+            noteAtlasFailure();
         }
     }
     const keyword = keywordSearch(observations, opts.text, { trail: opts.trail.id });

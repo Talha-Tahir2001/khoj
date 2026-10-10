@@ -1,15 +1,16 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { z } from "zod";
-import type { AdviceResponse, ScoredDay } from "@khoj/shared/types";
-import { loadConfig } from "../lib/config.js";
-import { getDb } from "../lib/mongo.js";
+import type { AdviceResponse, ScoredDay, Trail } from "@khoj/shared/types";
+import { loadConfig, hasElevenLabs, hasSerpApi, type Config } from "../lib/config.js";
+import { getDb, withTimeout } from "../lib/mongo.js";
 import { getObservations, getTrail } from "../lib/data.js";
 import { cached, cacheStoreFor } from "../lib/cache.js";
 import { MAX_FORECAST_DAYS, WeatherUnavailableError, fetchForecast, priorRainfall } from "../lib/weather.js";
 import { scoreDay, type ScoreInput } from "../lib/scoring.js";
 import { EMBEDDING_DIMENSIONS, retrieveSimilar } from "../lib/atlas.js";
-import { generateBrief, type Brief } from "../lib/brief.js";
-import { narrate } from "../lib/voice.js";
+import { generateBrief, briefUnavailableReason, type Brief } from "../lib/brief.js";
+import { voiceUnavailableReason } from "../lib/voice.js";
+import { shouldTry } from "../lib/upstream.js";
 import { searchLiveReports } from "../lib/serp.js";
 import { conditionsText, focalDay } from "../lib/conditions.js";
 import { captureError, startAgentSpan, withToolSpan } from "../lib/observability.js";
@@ -83,8 +84,59 @@ advice.get("/", async (c) => {
     const trail = getTrail(trailId);
     if (!trail) throw new ApiError(400, "UNKNOWN_TRAIL", `No trail with id '${trailId}'`);
 
-    const vector = parsed.data.embedding ? decodeEmbedding(parsed.data.embedding) : undefined;
+    // Hard ceiling on the whole request.
+    //
+    // Every individual upstream is already bounded, but four bounded calls in
+    // sequence can still add up to something a person on 4G will not wait for.
+    // This is a decision tool, not a dashboard: a slightly degraded answer
+    // arriving fast beats a complete one arriving after the trailhead.
+    return withTimeout(
+        buildAdvice(c, config, trail, days),
+        REQUEST_TIMEOUT_MS,
+        () => {
+            throw new ApiError(504, "UPSTREAM_TIMEOUT", "Upstream took too long. Try again.");
+        },
+    );
+});
 
+/** Decode the embedding if one was sent, else undefined. Invalid vectors are a 400. */
+function parsedEmbedding(c: { req: { query(): Record<string, string> } }): number[] | undefined {
+    const raw = c.req.query().embedding;
+    return raw ? decodeEmbedding(raw) : undefined;
+}
+
+/** The whole request, bounded by REQUEST_TIMEOUT_MS. */
+const REQUEST_TIMEOUT_MS = 20_000;
+
+/** `Server-Timing: forecast;dur=812, brief;dur=1204, total;dur=2400` */
+function formatServerTiming(timings: Record<string, number>): string {
+    return Object.entries(timings)
+        .map(([name, ms]) => `${name.replace(/\+/g, "")};dur=${Math.round(ms)}`)
+        .join(", ");
+}
+
+async function buildAdvice(
+    c: Context,
+    config: Config,
+    trail: Trail,
+    days: number,
+): Promise<Response> {
+    // Per-stage timing. Not just debugging: the challenge's Sentry category asks
+    // for latency numbers, and a total alone cannot tell you which upstream is
+    // the expensive one.
+    const t0 = Date.now();
+    let mark = t0;
+    const timings: Record<string, number> = {};
+    const stage = (name: string) => {
+        const now = Date.now();
+        timings[name] = now - mark;
+        mark = now;
+        if (config.NODE_ENV === "development") {
+            console.log(`[khoj]   ${name}: ${timings[name]}ms`);
+        }
+    };
+
+    const vector = parsedEmbedding(c);
     const requestId = crypto.randomUUID();
     const parentSpan = startAgentSpan(requestId);
     const conversationId = requestId;
@@ -93,6 +145,7 @@ advice.get("/", async (c) => {
         const db = getDb(config);
         const store = cacheStoreFor(db);
         const observations = getObservations();
+        stage("setup");
 
         // ── 1. Weather, cached ──────────────────────────────────────────────
         const { value: weather, hit: weatherCached } = await cached(
@@ -109,6 +162,7 @@ advice.get("/", async (c) => {
                 return rows.result;
             },
         );
+        stage("forecast");
 
         // ── 2. Scoring. Pure, no I/O, no clock. ────────────────────────────
         const inputs: ScoreInput[] = weather.map((w, i) => ({
@@ -119,14 +173,34 @@ advice.get("/", async (c) => {
         const scorer = scorers[config.SCORER] ?? scorers.rules!;
         const scored: ScoredDay[] = inputs.map((i) => scorer.score(i));
 
-        // ── 3. Retrieval ───────────────────────────────────────────────────
+        // ── 3 & 4. Retrieval and live reports run concurrently ──────────────
+        //
+        // They are independent, and serialising them made the request budget
+        // the sum of both rather than the slower of the two. Retrieval depends
+        // only on the scored day; SerpApi does not depend on retrieval at all.
         const focus = focalDay(scored);
         const text = focus ? conditionsText(focus) : "";
-        const similar = await retrieveSimilar(config, db, observations, {
-            trail,
-            text,
-            vector,
-        });
+
+        const [similar, serp] = await Promise.all([
+            retrieveSimilar(config, db, observations, { trail, text, vector }),
+            cached(
+                `serp:${trail.id}`,
+                config.CACHE_TTL_SERP,
+                store,
+                async () => {
+                    const rows = await withToolSpan(
+                        parentSpan,
+                        "search_live_reports",
+                        { "khoj.trail": trail.id },
+                        () => searchLiveReports(config, trail.name),
+                    );
+                    return rows.result;
+                },
+            ),
+        ]);
+
+        stage("retrieve+serp");
+
         const named = similar.results.map((r) => ({
             date: r.date,
             field_note: r.field_note,
@@ -134,22 +208,6 @@ advice.get("/", async (c) => {
             outcome: r.outcome,
             trail: r.trail_name,
         }));
-
-        // ── 4. Live reports, cached hard against the search budget ─────────
-        const serp = await cached(
-            `serp:${trail.id}`,
-            config.CACHE_TTL_SERP,
-            store,
-            async () => {
-                const rows = await withToolSpan(
-                    parentSpan,
-                    "search_live_reports",
-                    { "khoj.trail": trail.id },
-                    () => searchLiveReports(config, trail.name),
-                );
-                return rows.result;
-            },
-        );
 
         // ── 5. Brief ───────────────────────────────────────────────────────
         let brief: Brief = {
@@ -164,31 +222,66 @@ advice.get("/", async (c) => {
                 conversationId,
             );
         }
+        stage("brief");
 
         // ── 6. Voice ───────────────────────────────────────────────────────
-        const audio = brief.text ? await narrate(config, brief.text) : null;
+        // Deliberately NOT awaited here.
+        //
+        // Speech synthesis took 660 ms when it worked and over 20 s when it did
+        // not, and blocking a driving decision on it was the single largest
+        // contributor to response time. Audio is the first thing on the cut
+        // list; the verdict is not. The client fetches it separately, on demand,
+        // via /api/voice when the user actually presses play.
+        stage("voice");
 
-        const degraded =
-            similar.source === "keyword" ||
-            serp.value.length === 0 ||
-            brief.source === "rule" ||
-            audio === null;
+        // Say WHY things degraded. A bare `degraded: true` is undiagnosable —
+        // and the two most likely causes here (billing exhausted vs. flaky
+        // network) need completely different responses from whoever is reading it.
+        const reasons: Record<string, string> = {};
+        if (similar.source === "keyword") {
+            reasons.retrieval = db
+                ? "Atlas unreachable — fell back to keyword search, which cannot match phrasing."
+                : "Atlas not configured — keyword search only.";
+        }
+        if (brief.source === "rule") {
+            reasons.brief = briefUnavailableReason() ?? "Briefing model not configured.";
+        }
+        if (hasElevenLabs(config) && !shouldTry("elevenlabs")) {
+            reasons.audio = voiceUnavailableReason() ?? "Speech unavailable.";
+        } else if (!hasElevenLabs(config)) {
+            reasons.audio = "Speech not configured — the brief is text-only.";
+        }
+        if (serp.value.length === 0) {
+            reasons.live_reports = hasSerpApi(config)
+                ? "No recent web mentions found for this trail."
+                : "SerpApi not configured.";
+        }
+
+        const degraded = Object.keys(reasons).length > 0;
 
         const body: AdviceResponse = {
             trail,
             days: scored,
             similar_conditions: named,
-            brief: { ...brief, ...(audio ? { audio_url: audio } : {}) },
+            brief: {
+                ...brief,
+                reason: brief.source === "rule" ? (reasons.brief ?? null) : null,
+            },
             live_reports: serp.value,
             meta: {
                 cached: weatherCached,
                 generated_at: new Date().toISOString(),
                 model: brief.source === "gemma" ? config.GEMINI_MODEL : undefined,
                 degraded,
+                ...(degraded ? { reasons } : {}),
             },
         };
 
         c.header("X-Cache", weatherCached ? "HIT" : "MISS");
+        // Surface the breakdown so a slow request can be attributed without
+        // attaching a debugger.
+        c.header("Server-Timing", formatServerTiming(timings));
+        timings.total = Date.now() - t0;
         return c.json(body);
     } catch (err) {
         if (err instanceof WeatherUnavailableError) {
@@ -199,4 +292,4 @@ advice.get("/", async (c) => {
     } finally {
         parentSpan.end();
     }
-});
+}

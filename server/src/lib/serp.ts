@@ -28,9 +28,15 @@ export async function searchLiveReports(
         url.searchParams.set("q", `${trailName} trail conditions`);
         url.searchParams.set("gl", config.SERPAPI_GL);
         url.searchParams.set("hl", "en");
+        // Without this the request is unauthenticated and returns nothing —
+        // silently, since SerpApi answers 200 with an empty body.
+        url.searchParams.set("api_key", config.SERPAPI_KEY!);
 
-        const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-        if (!res.ok) return [];
+        const res = await fetch(url, { signal: AbortSignal.timeout(12_000) });
+        if (!res.ok) {
+            console.warn(`[serp] ${res.status} for "${trailName}"`);
+            return [];
+        }
 
         const body = (await res.json()) as {
             news_results?: Array<{ title?: string; snippet?: string; link?: string }>;

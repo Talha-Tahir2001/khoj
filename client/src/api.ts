@@ -107,3 +107,22 @@ const isLocalEmbeddingEnabled = (): boolean =>
 
 export const checkHealth = (): Promise<{ ok: boolean; uptime_s: number }> =>
     getJson("/health");
+
+/**
+ * Fetch the spoken brief on demand.
+ *
+ * Kept off the advice request because synthesis is slow and often unavailable,
+ * and a person deciding whether to drive six hours should not wait on it. The
+ * brief text is already on screen; this only runs when they press play.
+ */
+export async function fetchVoice(
+    text: string,
+    signal?: AbortSignal,
+): Promise<string> {
+    const params = new URLSearchParams({ text });
+    const { audio_url } = await getJson<{ audio_url: string }>(
+        `/voice?${params.toString()}`,
+        signal,
+    );
+    return audio_url;
+}

@@ -1,6 +1,7 @@
 import type { ScoredDay, Trail } from "@khoj/shared/types";
 import type { Config } from "./config.js";
 import { hasGemma } from "./config.js";
+import { noteFailure, noteOk, noteStatusFailure, reasonFor, shouldTry } from "./upstream.js";
 import type { SimilarCondition } from "./atlas.js";
 import { withChatSpan } from "./observability.js";
 import type * as Sentry from "@sentry/node";
@@ -40,7 +41,9 @@ export async function generateBrief(
     parentSpan: Sentry.Span | null,
     conversationId: string,
 ): Promise<Brief> {
-    if (!hasGemma(config)) return { text: ruleBrief(input), source: "rule" };
+    if (!hasGemma(config) || !shouldTry("gemini")) {
+        return { text: ruleBrief(input), source: "rule" };
+    }
 
     try {
         const { GoogleGenAI } = await import("@google/genai");
@@ -59,6 +62,11 @@ export async function generateBrief(
                 ai.models.generateContent({
                     model: config.GEMINI_MODEL,
                     contents: prompt,
+                    // Retries are disabled deliberately. The SDK retries on its
+                    // own, which turned a 1.2 s rejection into a 3 s wait — and
+                    // the brief is the largest single contributor to response
+                    // time after weather. A billing failure is deterministic;
+                    // asking twice cannot change the answer.
                     config: {
                         systemInstruction: SYSTEM_PROMPT,
                         maxOutputTokens: 200,
@@ -69,11 +77,44 @@ export async function generateBrief(
         );
 
         const text = result.text?.trim();
-        if (!text) return { text: ruleBrief(input), source: "rule" };
+        if (!text) {
+            noteFailure("gemini", "The briefing model returned nothing.");
+            return { text: ruleBrief(input), source: "rule" };
+        }
+
+        noteOk("gemini");
         return { text: trimToSentences(text, 3), source: "gemma" };
-    } catch {
+    } catch (err) {
+        const status = httpStatus(err);
+        noteStatusFailure(
+            "gemini",
+            status ?? 0,
+            status === 404
+                ? `"${config.GEMINI_MODEL}" is not available on this key.`
+                : status
+                  ? (GEMINI_ERRORS[String(status)] ?? `Briefing model returned HTTP ${status}.`)
+                  : "The briefing model is unreachable right now.",
+        );
         return { text: ruleBrief(input), source: "rule" };
     }
+}
+
+/**
+ * Status codes worth naming plainly. A billing failure and a network blip look
+ * identical in a response unless the app says which it was.
+ */
+const GEMINI_ERRORS: Record<string, string> = {
+    "401": "Gemini rejected the API key.",
+    "402": "Gemini API credits are exhausted — the brief falls back to rules.",
+    "403": "Gemini denied access to this model.",
+};
+
+/** Why the brief is rule-based, when it is. */
+export const briefUnavailableReason = (): string | undefined => reasonFor("gemini");
+
+function httpStatus(err: unknown): number | null {
+    const e = err as { status?: number; code?: number; response?: { status?: number } };
+    return e?.status ?? e?.code ?? e?.response?.status ?? null;
 }
 
 function composePrompt({ trail, day, similar, live_reports }: BriefInput): string {

@@ -19,9 +19,17 @@
 import "dotenv/config";
 import { MongoClient } from "mongodb";
 import { pipeline, env } from "@huggingface/transformers";
+import { applyDnsOverride } from "../server/src/lib/dns.js";
 import type { ConditionObservation } from "../shared/src/types.js";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+
+/**
+ * Opt-in DNS override, same as the server. See server/src/lib/dns.ts — without
+ * it this script dies with `querySrv ETIMEOUT` on the same networks where the
+ * API does.
+ */
+applyDnsOverride(process.env.DNS_SERVERS);
 
 const MODEL_ID = process.env.EMBEDDING_MODEL ?? "onnx-community/embeddinggemma-300m-ONNX";
 const EMBEDDING_DIMENSIONS = 768;
@@ -107,24 +115,57 @@ async function main() {
         process.exit(1);
     }
 
-    // Atlas's vector index definition is not yet in the driver's IndexSpecification
-    // type, so it is cast at the call site rather than spreading `as never` over the
-    // whole options object and losing real type checking on the keys.
-    await db.collection("observations").createIndex(
-        { embedding: "vector" } as never,
-        {
-            name: "vector_index",
-            type: "vectorSearch",
-            definition: "vectorSearch",
-            vectorSearch: {
-                numDimensions: EMBEDDING_DIMENSIONS,
-                path: "embedding",
-                similarity: "cosine",
-                numCandidates: 100,
-            },
-        } as never,
-    );
-    console.log(`vector_index created with numDimensions=${EMBEDDING_DIMENSIONS}, cosine`);
+    try {
+        // Atlas's vector index definition is not yet in the driver's
+        // IndexSpecification type, so it is cast at the call site rather than
+        // spreading `as never` over the whole options object and losing real
+        // type checking on the keys.
+        await db.collection("observations").createIndex(
+            { embedding: "vector" } as never,
+            {
+                name: "vector_index",
+                type: "vectorSearch",
+                definition: "vectorSearch",
+                vectorSearch: {
+                    numDimensions: EMBEDDING_DIMENSIONS,
+                    path: "embedding",
+                    similarity: "cosine",
+                    numCandidates: 100,
+                },
+            } as never,
+        );
+        console.log(`vector_index created with numDimensions=${EMBEDDING_DIMENSIONS}, cosine`);
+    } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+
+        // This one is not a code bug and the raw driver error says nothing
+        // actionable, so translate it.
+        if (message.includes("Unknown index plugin 'vector'")) {
+            console.error(`
+The observations were written successfully — only the vector INDEX failed.
+
+"Unknown index plugin 'vector'" means this cluster will not create an Atlas
+vector index from the driver. Two usual causes:
+
+  1. The database user lacks the role to create indexes.
+     → Atlas → Database Access → edit your user → add "Read Write" on the
+       cluster, or "Cluster Manager".
+  2. Atlas Search is not enabled on this cluster (common on M0).
+     → Atlas → Search → Create Search Index → choose "Vector Search"
+       → database "khoj", collection "observations", path "embedding",
+       numDimensions ${EMBEDDING_DIMENSIONS}, similarity cosine.
+     Creating it in the UI takes about 30 seconds and needs no role change.
+
+Until the index exists, retrieval falls back to keyword search. The app is
+fully functional — it just cannot match phrasing semantically.
+`);
+        } else {
+            console.error(`Vector index creation failed: ${message}`);
+        }
+
+        await client.close();
+        process.exit(1);
+    }
 
     await client.close();
     console.log("Done.");

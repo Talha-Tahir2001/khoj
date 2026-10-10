@@ -112,6 +112,13 @@ export function ThemeProvider({
       root.classList.remove("light", "dark")
       root.classList.add(resolvedTheme)
 
+      // Keep the mobile browser chrome in step. Without this the address bar
+      // stays light on a dark page, which on a phone is very visible.
+      const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]:not([media])')
+      if (meta) {
+        meta.content = resolvedTheme === "dark" ? "#14171a" : "#faf9f7"
+      }
+
       if (restoreTransitions) {
         restoreTransitions()
       }
