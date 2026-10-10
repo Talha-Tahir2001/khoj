@@ -125,8 +125,7 @@ for the thing the app actually needs rather than for the key's mere validity:
 
 ```
 Open-Meteo         OK    forecast for 2026-10-11
-MongoDB Atlas      OK    24 observations, 1648ms
-                         No vector_index — create one in Atlas → Search.
+MongoDB Atlas      OK    24 observations, 1307ms, vector_index queryable
 Gemini / Gemma     FAIL  key is VALID (2 gemma models listed) but
                          generateContent is refused: prepayment credits depleted
 ElevenLabs         OK    2/2 voices work (including the configured one)
@@ -137,6 +136,38 @@ Sentry             OK    project 4512232870838272
 Note the Gemini line: it can list models for free while every generation call is
 refused. "Valid key" and "usable key" are different claims, and only the second
 one matters.
+
+### Atlas specifics, learned the hard way
+
+**Search indexes are invisible to `listIndexes()`.** They live in their own
+namespace and are only visible via `$listSearchIndexes`. Checking `listIndexes()`
+reports "no vector_index" on a cluster where a fully built, queryable index
+exists — a diagnostic that lies in the most expensive direction.
+
+**`queryVector` must be a plain `number[]`.** Verified against the live cluster:
+
+| Form | Result |
+|---|---|
+| `number[]` | works |
+| `Float32Array` | `Unexpected type found when parsing vector` |
+| `Binary(Float32Array.buffer)` | `BSON binary subtype 0 is not supported` |
+
+TypeScript accepts all of them. It fails only at query time against the real
+index, so no unit test would have caught it.
+
+**The base64 vector needs `URLSearchParams`, never string interpolation.** `btoa`
+emits `+`, and a `+` in a query string decodes as a space — which truncates the
+vector and arrives as "768 floats expected, 757 got".
+
+Verify the whole chain with:
+
+```bash
+npm run probe:atlas   # semantic query against the live index, vs keyword
+npm run probe:e2e     # through the running API, as the browser does
+```
+
+`probe:e2e` prints which retrieval path answered each trail. `ATLAS
+$vectorSearch` means the real thing is serving results, not the fallback.
 
 `verify:trails` loads the real EmbeddingGemma model and asserts that each
 trail's own observation comes back first when used as its own query. It is a

@@ -38,7 +38,21 @@ interface ProjectionObservation {
     score?: number;
 }
 
-const asFloat32 = (vector: number[]): Float32Array => Float32Array.from(vector);
+/**
+ * The query vector MUST go over the wire as a plain `number[]`.
+ *
+ * Verified against the live Atlas cluster — all three other forms fail:
+ *
+ *   Float32Array                  → "Unexpected type found when parsing vector"
+ *   Binary(Float32Array.buffer)   → "BSON binary subtype 0 is not supported"
+ *   Binary(Buffer.from(floats))   → same
+ *   number[]                      → works
+ *
+ * This is easy to get wrong because the driver's types accept a Float32Array
+ * and TypeScript does not object. It fails only at query time, against the
+ * live index — so a "working" unit test would not have caught it.
+ */
+const asQueryVector = (vector: number[]): number[] => vector;
 
 /** Reject a vector the Atlas index could never accept. */
 export function isValidVector(vector: unknown): vector is number[] {
@@ -63,7 +77,7 @@ export async function vectorSearch(
     const search: Record<string, unknown> = {
         index: "vector_index",
         path: "embedding",
-        queryVector: asFloat32(vector),
+        queryVector: asQueryVector(vector),
         numCandidates: 100,
         limit,
     };

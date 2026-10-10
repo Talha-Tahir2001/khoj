@@ -83,16 +83,43 @@ const checks: Check[] = [
                 await client.connect();
                 const db = client.db(process.env.MONGO_DB ?? "khoj");
                 const observations = await db.collection("observations").countDocuments();
-                const indexes = await db.collection("observations").listIndexes().toArray();
-                const hasVector = indexes.some((i) => i.name === "vector_index");
+
+                // Search indexes are NOT regular indexes and do not appear in
+                // listIndexes() — they live in their own namespace and are only
+                // visible through $listSearchIndexes. Checking listIndexes()
+                // here reported "no vector_index" on a cluster where a fully
+                // built, queryable index existed, which is worse than useless.
+                let vectorIndex: { status?: string; queryable?: boolean } | undefined;
+                try {
+                    const search = (await db
+                        .collection("observations")
+                        .aggregate([{ $listSearchIndexes: {} }])
+                        .toArray()) as Array<{
+                        name?: string;
+                        status?: string;
+                        queryable?: boolean;
+                    }>;
+                    vectorIndex = search.find((i) => i.name === "vector_index");
+                } catch {
+                    // Older servers have no $listSearchIndexes. Absence of the
+                    // stage is not absence of the index.
+                }
+
+                const ready = vectorIndex?.queryable === true;
                 return {
                     pass: observations > 0,
                     detail: `${observations} observations, ${Date.now() - started}ms${
-                        hasVector ? ", vector_index present" : ""
+                        ready
+                            ? ", vector_index queryable"
+                            : vectorIndex
+                              ? `, vector_index ${vectorIndex.status ?? "building"}`
+                              : ""
                     }`,
-                    hint: hasVector
+                    hint: ready
                         ? undefined
-                        : "No vector_index — create one in Atlas → Search, or run npm run seed:atlas.",
+                        : vectorIndex
+                          ? "Index is still building. Wait for status READY."
+                          : "No vector_index found via $listSearchIndexes. Create one in Atlas → Search, or run npm run seed:atlas.",
                 };
             } finally {
                 await client.close();

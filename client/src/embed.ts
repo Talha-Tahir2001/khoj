@@ -154,6 +154,11 @@ export function warmUp(): void {
  *
  * The request stays a GET, which keeps it cacheable by CDN and browser and
  * shareable — a friend can open the exact same advice link.
+ *
+ * IMPORTANT: this string contains `+`, `/` and `=`. It MUST reach the URL via
+ * `URLSearchParams`, never raw string interpolation. A `+` in a query string
+ * decodes as a space, which silently truncates the vector and the server then
+ * rejects it as the wrong dimension — 768 floats arriving as 757.
  */
 export function encodeVector(vector: number[]): string {
     const bytes = new Uint8Array(vector.length * 4);

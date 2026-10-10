@@ -15,6 +15,8 @@
         "typecheck": "npm run typecheck -w server && npm run typecheck -w client",
         "seed:atlas": "tsx scripts/seed-atlas.ts",
         "check:keys": "tsx scripts/check-keys.ts",
+        "probe:atlas": "tsx scripts/probe-vector-search.ts",
+        "probe:e2e": "tsx scripts/probe-e2e.ts",
         "verify:retrieval": "tsx scripts/verify-retrieval.ts",
         "verify:trails": "tsx scripts/verify-trails.ts"
     },
