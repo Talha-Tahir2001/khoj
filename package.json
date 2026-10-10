@@ -14,6 +14,7 @@
         "test:watch": "npm run test:watch -w server",
         "typecheck": "npm run typecheck -w server && npm run typecheck -w client",
         "seed:atlas": "tsx scripts/seed-atlas.ts",
+        "check:keys": "tsx scripts/check-keys.ts",
         "verify:retrieval": "tsx scripts/verify-retrieval.ts",
         "verify:trails": "tsx scripts/verify-trails.ts"
     },

@@ -24,21 +24,23 @@ const PROBE_LIMIT = 4;
  * Fallback candidates, tried in order when the configured voice is refused.
  *
  * Worth recording *why* this list exists, because the failure is deeply
- * misleading: a free ElevenLabs plan cannot use **library voices** over the API
- * at all, and it reports that as
+ * misleading: a free ElevenLabs plan cannot use **library/professional** voices
+ * over the API at all, and it reports that as
  *
  *     402 paid_plan_required
  *     "Free users cannot use library voices via the API."
  *
- * which reads exactly like exhausted credits and is not. Several of these voice
- * IDs are however reachable on a free tier, and the app finds one itself rather
- * than making you diagnose your own account.
+ * which reads exactly like exhausted credits and is not. Premade voices work
+ * fine on the same key — verified against four of them.
+ *
+ * The app finds a working one itself rather than making you diagnose your own
+ * account, because the error message points at billing and that is a dead end.
  */
 const FALLBACK_VOICE_IDS = [
+    "JBFqnCBsd6RMkjVDRZzb", // George — Warm, Captivating Storyteller
     "bIHbv24MWmeRgasZH58o", // Will — Relaxed Optimist
     "EXAVITQu4vr4xnSDxMaL", // Sarah — Mature, Reassuring
     "pNInz6obpgDQGcFmaJgB", // Adam — Dominant, Firm
-    "jBqdMUZWMYHZHUpQvB9L", // Sara — Calm, Narrator
 ];
 
 let resolvedVoiceId: string | null = null;

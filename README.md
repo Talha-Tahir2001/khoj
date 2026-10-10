@@ -113,10 +113,30 @@ blocked. Changing `GEMINI_BASE_URL` changes which project is billed.
 ### Verification scripts
 
 ```bash
-npm run verify:trails      # G2: retrieval returns non-empty for all six trails
-npm run verify:retrieval   # semantic vs keyword retrieval, side by side
-npm run seed:atlas         # embed the corpus + create the Atlas vector index
+npm run check:keys        # what can each credential actually reach, right now
+npm run verify:trails     # G2: retrieval returns non-empty for all six trails
+npm run verify:retrieval  # semantic vs keyword retrieval, side by side
+npm run seed:atlas        # embed the corpus + create the Atlas vector index
 ```
+
+**`check:keys` first, always.** Every upstream in this project has a failure
+mode that is either silent or actively misleading, so the script tests each one
+for the thing the app actually needs rather than for the key's mere validity:
+
+```
+Open-Meteo         OK    forecast for 2026-10-11
+MongoDB Atlas      OK    24 observations, 1648ms
+                         No vector_index — create one in Atlas → Search.
+Gemini / Gemma     FAIL  key is VALID (2 gemma models listed) but
+                         generateContent is refused: prepayment credits depleted
+ElevenLabs         OK    2/2 voices work (including the configured one)
+SerpApi            OK    20 results
+Sentry             OK    project 4512232870838272
+```
+
+Note the Gemini line: it can list models for free while every generation call is
+refused. "Valid key" and "usable key" are different claims, and only the second
+one matters.
 
 `verify:trails` loads the real EmbeddingGemma model and asserts that each
 trail's own observation comes back first when used as its own query. It is a
