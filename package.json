@@ -10,6 +10,17 @@
         "dev:client": "npm run dev -w client",
         "dev:server": "npm run dev -w server",
         "build": "npm run build -w client",
-        "typecheck": "npm run typecheck -w client"
+        "test": "npm run test -w server",
+        "test:watch": "npm run test:watch -w server",
+        "typecheck": "npm run typecheck -w server && npm run typecheck -w client",
+        "seed:atlas": "tsx scripts/seed-atlas.ts",
+        "verify:retrieval": "tsx scripts/verify-retrieval.ts",
+        "verify:trails": "tsx scripts/verify-trails.ts"
+    },
+    "devDependencies": {
+        "@huggingface/transformers": "^4.2.0",
+        "dotenv": "^18.0.7",
+        "tsx": "^4.23.15",
+        "typescript": "^6.0.2"
     }
 }

@@ -1,0 +1,93 @@
+# Khoj — two Render services from one repository.
+#
+# The split is the whole point. A single Node process would put Render's free-tier
+# cold start (0.1 CPU / 512 MB, ~60 s with a loading page) BEFORE first paint.
+# With the split, the PWA shell comes off the CDN instantly while the API is
+# still waking, so a judge sees the trail list immediately and only the verdict
+# call is slow.
+
+services:
+  # ── The PWA shell. CDN-served, never sleeps, always fast. ──────────
+  - type: static
+    name: khoj-site
+    runtime: static
+    buildCommand: npm ci && npm run build -w client
+    staticPublishPath: ./client/dist
+    buildFilter:
+      - "**/*"
+    routes:
+      # The service worker must never be cached, or updates never land.
+      - type: rewrite
+        source: /sw.js
+        destination: /sw.js
+    headers:
+      - path: /sw.js
+        name: Cache-Control
+        value: no-cache
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+
+  # ── The API. Holds every key. Sleeps when idle; the cron below wakes it. ──
+  - type: web
+    name: khoj-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "24"
+
+      # ── Atlas. The only value the app genuinely requires. ──
+      - key: MONGO_URI
+        sync: false
+      - key: MONGO_DB
+        value: khoj
+
+      # ── Scoring. ──
+      - key: SCORER
+        value: rules
+
+      # ── Open-Meteo. No key needed for non-commercial use. ──
+      - key: OPEN_METHO_BASE_URL
+        value: https://api.open-meteo.com/v1
+
+      # ── Optional. Each has a documented fallback when absent. ──
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.0-flash
+      - key: GEMINI_ENABLED
+        value: "true"
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: SERPAPI_KEY
+        sync: false
+      - key: SERPAPI_GL
+        value: pk
+      - key: SENTRY_DSN
+        sync: false
+      - key: SENTRY_TRACES_SAMPLE_RATE
+        value: "1.0"
+      - key: SENTRY_ENVIRONMENT
+        value: production
+
+      # ── CORS. The Static Site and this service are different origins. ──
+      - key: PUBLIC_SITE_ORIGIN
+        sync: false
+
+      # ── Cache TTLs, seconds. ──
+      - key: CACHE_TTL_FORECAST
+        value: "3600"
+      - key: CACHE_TTL_SERP
+        value: "43200"
+      - key: CACHE_TTL_BRIEF
+        value: "86400"
+
+# Free instances spin down after 15 minutes idle. Render may also suspend one
+# that "initiates an uncomably high volume of traffic over the public internet."
+# Caching keeps steady-state outbound near zero, which is the other half of that.

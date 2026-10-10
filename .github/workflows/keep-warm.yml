@@ -1,0 +1,26 @@
+name: Keep Khoj API awake
+
+# Render's free tier spins down after 15 minutes idle and shows a loading page
+# while an instance wakes — roughly a minute. For a tool whose whole job is
+# being opened on a phone before a drive, that minute is the product failing.
+#
+# The cron targets /api/health SPECIFICALLY. Render intercepts /robots.txt while
+# an instance is spun down, and that request does NOT wake it.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: keep-warm
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wake the API
+        run: |
+          curl -fsS --max-time 60 "${{ secrets.KHOJ_HEALTH_URL }}"
+        env:
+          KHOJ_HEALTH_URL: ${{ secrets.KHOJ_HEALTH_URL }}

@@ -1,0 +1,60 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+dist/
+dist-ssr
+build/
+*.tsbuildinfo
+
+# Environment — never commit real values
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Client Vite env
+client/.env
+client/.env.local
+client/.env.*.local
+!client/.env.example
+
+# Model weights — fetched at runtime, never committed
+# EmbeddingGemma-300M ONNX q4 is ~300MB.
+/models/
+.cache/
+**/transformers-cache/
+public/models/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Test output
+coverage/
+.nyc_output/
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS
+ehthumbs.db
+Desktop.ini
+
+# Vercel / Netlify (not used, but common enough to guard against)
+.vercel
+.netlify

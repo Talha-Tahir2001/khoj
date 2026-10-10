@@ -1,0 +1,199 @@
+[
+  {
+    "_id": "daman-e-koh-2026-10-03",
+    "trail": "daman-e-koh",
+    "date": "2026-10-03",
+    "conditions_text": "Dry after two clear days, mild morning around 17C, light breeze on the ridge, sunny afternoon.",
+    "field_note": "Completely dry all the way to the viewpoint. Paved path, no mud at all. Took it in sandals.",
+    "outcome": "good"
+  },
+  {
+    "_id": "daman-e-koh-2026-09-27",
+    "trail": "daman-e-koh",
+    "date": "2026-09-27",
+    "conditions_text": "Rain the previous two days, overcast and damp, streams running high, cool and humid.",
+    "field_note": "Lower section was slick but walkable. Some water across the path near the base. Railed steps were fine. Would not have enjoyed it in the rain.",
+    "outcome": "partial"
+  },
+  {
+    "_id": "daman-e-koh-2026-08-16",
+    "trail": "daman-e-koh",
+    "date": "2026-08-16",
+    "conditions_text": "Monsoon rain, heavy and continuous, very humid, warm, poor visibility.",
+    "field_note": "Turned back at the first gate. Water pouring down the steps, lightning within the hour. Not a trail for this.",
+    "outcome": "bad"
+  },
+  {
+    "_id": "daman-e-koh-2026-10-11",
+    "trail": "daman-e-koh",
+    "date": "2026-10-11",
+    "conditions_text": "Cold clear morning, light frost on the ground, bright sun later, wind picking up by noon.",
+    "field_note": "Cold hands for the first twenty minutes then fine. Ridge was breezy but not unpleasant. Good day.",
+    "outcome": "good"
+  },
+
+  {
+    "_id": "margalla-hills-np-2026-10-05",
+    "trail": "margalla-hills-np",
+    "date": "2026-10-05",
+    "conditions_text": "Sunny and clear, light wind, warm midday, dry trails.",
+    "field_note": "Did the Saidpur loop. Dry, dusty, pleasant. Lots of people out. Spotted grey squirrel and a barking deer near the end.",
+    "outcome": "good"
+  },
+  {
+    "_id": "margalla-hills-np-2026-09-24",
+    "trail": "margalla-hills-np",
+    "date": "2026-09-24",
+    "conditions_text": "Post-rain, muddy paths, waterlogged ground, low cloud, cool.",
+    "field_note": "Muddy lower paths for the first hour. Got a bogged pair of shoes. Monaha side was worse. The ridge section had dried out.",
+    "outcome": "partial"
+  },
+  {
+    "_id": "margalla-hills-np-2026-07-02",
+    "trail": "margalla-hills-np",
+    "date": "2026-07-02",
+    "conditions_text": "Hot and dry, clear sky, intense sun, very warm.",
+    "field_note": "Started at six and it was still climbing hard by ten. Water carrying is essential in summer. Not a place to be out at midday.",
+    "outcome": "partial"
+  },
+  {
+    "_id": "margalla-hills-np-2026-10-09",
+    "trail": "margalla-hills-np",
+    "date": "2026-10-09",
+    "conditions_text": "Valley fog in the morning, clearing to a bright afternoon, mild.",
+    "field_note": "No view at all until eleven. Fog sits in the valley and the ridge tops are above it, which was actually the interesting part. Cleared by lunch.",
+    "outcome": "partial"
+  },
+
+  {
+    "_id": "murree-2026-10-01",
+    "trail": "murree",
+    "date": "2026-10-01",
+    "conditions_text": "Cool clear morning, dry ground, scattered cloud, light breeze, cool afternoon.",
+    "field_note": "Pine trails dry and good. Cold enough for a jacket even at midday. Very busy, parking was the hard part.",
+    "outcome": "good"
+  },
+  {
+    "_id": "murree-2026-09-20",
+    "trail": "murree",
+    "date": "2026-09-20",
+    "conditions_text": "Heavy rain the day before, saturated ground, streams high, overcast, cold.",
+    "field_note": "Absolute mud on the lower forest trails. Slipped twice. The viewpoint path had drained better but the descent was a mess.",
+    "outcome": "bad"
+  },
+  {
+    "_id": "murree-2026-06-14",
+    "trail": "murree",
+    "date": "2026-06-14",
+    "conditions_text": "Steady rain, monsoon, cold and wet, muddy, poor visibility.",
+    "field_note": "Monsoon does not really stop here in June. Turned back after forty minutes.",
+    "outcome": "bad"
+  },
+  {
+    "_id": "murree-2026-10-08",
+    "trail": "murree",
+    "date": "2026-10-08",
+    "conditions_text": "Dry and sunny, cool start, warm by noon, light cloud building.",
+    "field_note": "Good day. Slight haze in the afternoon but views were fine in the morning. Walked it in trainers.",
+    "outcome": "good"
+  },
+
+  {
+    "_id": "galiyat-2026-10-14",
+    "trail": "galiyat",
+    "date": "2026-10-14",
+    "conditions_text": "Muddy after rain, stream crossing high, overcast, cold morning, drying later.",
+    "field_note": "Lower trail impassable past the waterfall. Ridge was fine but very windy at the top. Started late and lost the light.",
+    "outcome": "partial"
+  },
+  {
+    "_id": "galiyat-2026-10-02",
+    "trail": "galiyat",
+    "date": "2026-10-02",
+    "conditions_text": "Dry, clear, cool morning, strong wind on the ridge, bright afternoon.",
+    "field_note": "Forest approach was beautiful. The ridge was genuinely unpleasant in the wind, had to lean into it going up. Turned back from the last section.",
+    "outcome": "partial"
+  },
+  {
+    "_id": "galiyat-2026-07-18",
+    "trail": "galiyat",
+    "date": "2026-07-18",
+    "conditions_text": "Hot, humid, thunderstorms building in the afternoon, heavy cloud, rain likely.",
+    "field_note": "Left at dawn to beat the storms. Caught the edge of one cell on the ridge at about two. Turned back fast.",
+    "outcome": "partial"
+  },
+  {
+    "_id": "galiyat-2026-10-10",
+    "trail": "galiyat",
+    "date": "2026-10-10",
+    "conditions_text": "Cold and clear, overnight rain has stopped, damp ground, mist in the valley, bright later.",
+    "field_note": "Ground damp underfoot but not mud. Mist burned off by ten and the autumn colour was the best I have seen on this trail. Ridge windy again but manageable.",
+    "outcome": "good"
+  },
+
+  {
+    "_id": "kaghan-2026-09-30",
+    "trail": "kaghan",
+    "date": "2026-09-30",
+    "conditions_text": "Recent heavy rain, saturated meadows, water standing in the fields, cool and overcast.",
+    "field_note": "The meadow trails were water. Ankle deep in two places and the ground gave way underfoot. The upper forest trail was fine but we lost time getting around the flooded section.",
+    "outcome": "partial"
+  },
+  {
+    "_id": "kaghan-2026-10-06",
+    "trail": "kaghan",
+    "date": "2026-10-06",
+    "conditions_text": "Dry after several clear days, cold crisp morning, sunny, light wind.",
+    "field_note": "Best day on the valley floor so far. Ground firm, streams running clear and low, snow peaks visible all the way up. Cold start but perfect.",
+    "outcome": "good"
+  },
+  {
+    "_id": "kaghan-2026-08-22",
+    "trail": "kaghan",
+    "date": "2026-08-22",
+    "conditions_text": "Monsoon rain, thunderstorms, very humid, warm, muddy.",
+    "field_note": "Storms twice in four hours. The river crossing was the real problem, running brown and fast.",
+    "outcome": "bad"
+  },
+  {
+    "_id": "kaghan-2026-10-13",
+    "trail": "kaghan",
+    "date": "2026-10-13",
+    "conditions_text": "Damp and cool, mist burning off, cloud on the peaks, clearing through the morning.",
+    "field_note": "Damp underfoot but passable. Cloud sat on the peaks until eleven which killed the view, then cleared fast. Worth it anyway.",
+    "outcome": "good"
+  },
+
+  {
+    "_id": "babusar-2026-10-05",
+    "trail": "babusar",
+    "date": "2026-10-05",
+    "conditions_text": "Cold, first snow of the season on the pass, sleet, near zero visibility, freezing at altitude.",
+    "field_note": "Road closed below the pass. Turned around at the barrier. Six hours to drive up and two hours to turn back. Do not attempt.",
+    "outcome": "bad"
+  },
+  {
+    "_id": "babusar-2026-09-25",
+    "trail": "babusar",
+    "date": "2026-09-25",
+    "conditions_text": "Cold and windy, sleet on the upper pass, low cloud, freezing level close to the pass height.",
+    "field_note": "Drove up in rain, sleet started at the last switchbacks. Pass was white. The Kaghan valley below was fine, but Babusar itself was done for the season.",
+    "outcome": "bad"
+  },
+  {
+    "_id": "babusar-2026-10-08",
+    "trail": "babusar",
+    "date": "2026-10-08",
+    "conditions_text": "Clear and cold, hard frost overnight, brilliant sunshine, no snow on the pass, still very windy.",
+    "field_note": "Frost on everything at the top, air was sharp but the road was open and clear. Wind at the pass was strong enough to lean on the car. Worth the drive.",
+    "outcome": "good"
+  },
+  {
+    "_id": "babusar-2026-10-10",
+    "trail": "babusar",
+    "date": "2026-10-10",
+    "conditions_text": "Overcast and cold, cloud on the pass, strong wind, dry ground, no new snow.",
+    "field_note": "Road open but you could not see fifty metres at the pass. Everything frozen solid. Coldest it has been all season up there and the forecast did not obviously show it.",
+    "outcome": "partial"
+  }
+]

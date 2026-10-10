@@ -1,0 +1,18 @@
+{
+  "name": "Khoj — which Saturday is worth the drive",
+  "short_name": "Khoj",
+  "description": "Scored hiking conditions for six trails in northern Pakistan, with every penalty shown.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#faf9f7",
+  "theme_color": "#faf9f7",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

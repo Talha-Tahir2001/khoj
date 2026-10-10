@@ -1,0 +1,62 @@
+[
+  {
+    "id": "daman-e-koh",
+    "name": "Daman-e-Koh",
+    "lat": 33.736,
+    "lon": 73.054,
+    "elevation_m": 1300,
+    "difficulty": "easy",
+    "typical_hours": 3,
+    "notes": "Ridge trail above Pir Sohawa, 1-2 h from Islamabad. Paved and railed most of the way. The most reliable trail on this list in any weather short of a storm."
+  },
+  {
+    "id": "margalla-hills-np",
+    "name": "Margalla Hills NP",
+    "lat": 33.74,
+    "lon": 73.05,
+    "elevation_m": 1500,
+    "difficulty": "easy",
+    "typical_hours": 4,
+    "notes": "National park network west of Islamabad, trails from Daman-e-Koh up through Saidpur and Monaha. Wildlife sightings most likely in early morning."
+  },
+  {
+    "id": "murree",
+    "name": "Murree",
+    "lat": 33.9058,
+    "lon": 73.3903,
+    "elevation_m": 2300,
+    "difficulty": "moderate",
+    "typical_hours": 4,
+    "notes": "Pine forest and viewpoints on the Mall Road side. Heavy weekend footfall; the lower paths get churned to mud quickly after rain."
+  },
+  {
+    "id": "galiyat",
+    "name": "Galiyat",
+    "lat": 34.1667,
+    "lon": 73.38,
+    "elevation_m": 2600,
+    "difficulty": "moderate",
+    "typical_hours": 5,
+    "notes": "Autumn colour through mid-October. The ridge section is exposed and picks up wind with little warning. Forest approach is easy; the ridge is the commitment."
+  },
+  {
+    "id": "kaghan",
+    "name": "Kaghan",
+    "lat": 34.6069,
+    "lon": 73.3103,
+    "elevation_m": 1900,
+    "difficulty": "moderate",
+    "typical_hours": 5,
+    "notes": "Kaghan valley, Babusar road start. Meadow trails through the valley floor. Post-monsoon the meadows hold water and the lower routes turn to mud."
+  },
+  {
+    "id": "babusar",
+    "name": "Babusar",
+    "lat": 35.6697,
+    "lon": 74.0897,
+    "elevation_m": 3800,
+    "difficulty": "hard",
+    "typical_hours": 7,
+    "notes": "The Babusar Pass road, above 3,800 m. Six hours each way from Islamabad. First snow of the season can close it in October. If the pass is white, turn around."
+  }
+]
