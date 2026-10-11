@@ -16,19 +16,32 @@ const schema = z.object({
     OPEN_METHO_BASE_URL: z.string().url().default("https://api.open-meteo.com/v1"),
 
     GEMINI_API_KEY: z.string().optional(),
+
     /**
      * Base URL for the Gemini REST API.
      *
-     * Defaults to AI Studio. Point it at
+     * Defaults to AI Studio. Set to a Vertex URL when that project has quota:
+     *
      *   https://<location>-aiplatform.googleapis.com/v1/projects/<project>/locations/<location>
-     * for Vertex AI, or at any gateway in front of either. That is why the brief
-     * layer calls the endpoint directly instead of using @google/genai — the SDK
-     * fixes the base URL and adds retries we do not control.
+     *
+     * The two are billed against different projects, so a key can be refused
+     * on one and work on the other. That is not hypothetical — see
+     * GEMINI_FALLBACK_BASE_URL.
      */
     GEMINI_BASE_URL: z
         .string()
         .url()
         .default("https://generativelanguage.googleapis.com/v1beta"),
+
+    /**
+     * Optional second endpoint, tried when the first refuses.
+     *
+     * Vertex AI and AI Studio bill different projects, and a 402 from one says
+     * nothing about the other. Rather than making someone diagnose which
+     * surface has quota, the brief layer tries the next combination.
+     */
+    GEMINI_FALLBACK_BASE_URL: z.string().url().optional(),
+
     GOOGLE_CLOUD_PROJECT: z.string().optional(),
     GOOGLE_CLOUD_LOCATION: z.string().default("us-central1"),
     GEMINI_MODEL: z.string().default("gemma-4-31b-it"),

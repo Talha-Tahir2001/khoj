@@ -30,13 +30,19 @@ const SYSTEM_PROMPT = [
 ].join(" ");
 
 /**
- * Fallback open-weight Gemma ids.
+ * Model candidates, in order.
  *
- * These are the models that make the challenge claim unambiguous: the same
- * family as the EmbeddingGemma running client-side, not just a Gemini model
- * wearing the name. Tried in order after the configured model.
+ * AI Studio serves the open-weight `gemma-*` ids; Vertex AI does not — it only
+ * offers hosted Gemini. So the two endpoints need different model lists, and
+ * trying a Gemma id against Vertex just returns a 404.
+ *
+ * Ordering matters for the challenge claim: an open-weight Gemma id is the same
+ * family as the EmbeddingGemma running client-side, whereas `gemini-*` is a
+ * hosted model wearing the name. Gemma is preferred wherever it is reachable,
+ * but a working brief beats an honest one about a model that is not available.
  */
-const GEMMA_FALLBACK_MODEL_IDS = ["gemma-4-31b-it", "gemma-4-26b-a4b-it"];
+const AI_STUDIO_MODELS = ["gemma-4-31b-it", "gemma-4-26b-a4b-it", "gemini-2.5-flash"];
+const VERTEX_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro"];
 
 /** Shape of the subset of the Gemini REST response we rely on. */
 interface GeminiResponse {
@@ -48,6 +54,32 @@ interface GeminiResponse {
     error?: { message?: string; status?: string };
 }
 
+interface Target {
+    baseUrl: string;
+    modelId: string;
+    /** Fully-qualified model path, including the publisher segment. */
+    modelPath: string;
+    /** Human label for logs. */
+    surface: "ai-studio" | "vertex";
+}
+
+/**
+ * AI Studio and Vertex build the model path differently, and the difference is
+ * easy to miss because AI Studio's version is just `models/<id>`:
+ *
+ *   AI Studio  <base>/models/<id>
+ *   Vertex     <base>/publishers/google/models/<id>
+ *
+ * Getting this wrong returns a clean 404 that reads like "model unavailable",
+ * which is exactly what a plan restriction looks like. It cost one confusing
+ * round of debugging here.
+ */
+function modelPathFor(baseUrl: string, modelId: string): string {
+    return baseUrl.includes("aiplatform")
+        ? `publishers/google/models/${modelId}`
+        : `models/${modelId}`;
+}
+
 class GeminiError extends Error {
     constructor(
         readonly status: number,
@@ -55,6 +87,67 @@ class GeminiError extends Error {
     ) {
         super(message);
     }
+}
+
+/**
+ * Every endpoint/model combination worth trying, best first.
+ *
+ * Vertex AI and AI Studio bill **different projects**. A 402 from one says
+ * nothing about the other — verified: this key was refused on AI Studio with
+ * "prepayment credits are depleted" while `gemini-2.5-flash` on a Vertex
+ * project answered normally.
+ *
+ * So rather than making someone work out which surface has quota, try them in
+ * turn and stop at the first that works.
+ */
+function targets(config: Config): Target[] {
+    const list: Target[] = [];
+
+    const push = (baseUrl: string, modelIds: string[]) => {
+        const base = baseUrl.replace(/\/$/, "");
+        const surface = base.includes("aiplatform") ? "vertex" : "ai-studio";
+        for (const modelId of dedupe(modelIds)) {
+            list.push({ baseUrl: base, modelId, modelPath: modelPathFor(base, modelId), surface });
+        }
+    };
+
+    if (config.GEMINI_BASE_URL.includes("generativelanguage")) {
+        // A Gemma id belongs here; a Gemini id is the fallback for a plan that
+        // does not expose the open-weight models.
+        push(config.GEMINI_BASE_URL, [config.GEMINI_MODEL, ...AI_STUDIO_MODELS]);
+    }
+
+    if (config.GEMINI_FALLBACK_BASE_URL) {
+        const isVertex = config.GEMINI_FALLBACK_BASE_URL.includes("aiplatform");
+        push(config.GEMINI_FALLBACK_BASE_URL, [
+            config.GEMINI_MODEL,
+            ...(isVertex ? VERTEX_MODELS : AI_STUDIO_MODELS),
+        ]);
+    } else if (config.GOOGLE_CLOUD_PROJECT) {
+        const { GOOGLE_CLOUD_PROJECT: project, GOOGLE_CLOUD_LOCATION: location } = config;
+        push(
+            `https://${location}-aiplatform.googleapis.com/v1/projects/${project}/locations/${location}`,
+            VERTEX_MODELS,
+        );
+    }
+
+    // Never send a Gemma id to Vertex: Google hosts open-weight Gemma on AI
+    // Studio only, so it is always a 404 there and just burns the timeout.
+    return dedupeTargets(list).filter((t) =>
+        t.surface === "vertex" ? VERTEX_MODELS.includes(t.modelId) : true,
+    );
+}
+
+const dedupe = (xs: string[]): string[] => xs.filter((x, i) => x && xs.indexOf(x) === i);
+
+function dedupeTargets(xs: Target[]): Target[] {
+    const seen = new Set<string>();
+    return xs.filter((t) => {
+        const k = `${t.baseUrl}|${t.modelId}`;
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+    });
 }
 
 /**
@@ -95,22 +188,37 @@ export async function generateBrief(
     let lastStatus = 0;
     let lastMessage = "";
 
-    for (const modelId of modelChain(config)) {
+    for (const target of targets(config)) {
         try {
-            const raw = await callGemini(config, modelId, prompt);
+            const raw = await callGemini(config, target, prompt);
+            const text = trimToSentences(raw, 3);
+
+            /**
+             * Reject a truncated or degenerate response.
+             *
+             * A model that runs out of token budget mid-sentence returns a
+             * fragment with no terminator. Presenting that as the brief looks
+             * like the app is broken, and it is strictly worse than the
+             * rule-based fallback — which at least always reads as a
+             * complete sentence. Observed with reasoning enabled at a 200-token
+             * budget: "Babusar is a solid go for".
+             */
+            if (text.length < 40 || !/[.!?]$/.test(text)) {
+                lastStatus = 502;
+                lastMessage = `${target.modelId} returned a truncated brief (${text.length} chars)`;
+                continue;
+            }
+
+            console.log(`[khoj] brief written by ${target.modelId} on ${target.surface}`);
             return {
-                text: trimToSentences(raw, 3),
-                source: modelId.startsWith("gemma-") ? "gemma" : "gemini",
-                model: modelId,
+                text,
+                source: target.modelId.startsWith("gemma-") ? "gemma" : "gemini",
+                model: target.modelId,
                 reason: null,
             };
         } catch (err) {
             lastStatus = err instanceof GeminiError ? err.status : 0;
             lastMessage = err instanceof Error ? err.message : String(err);
-
-            // Deterministic failures — bad key, no plan, no quota — will not be
-            // fixed by trying the next model. Stop.
-            if (lastStatus === 401 || lastStatus === 402 || lastStatus === 403) break;
         }
     }
 
@@ -127,10 +235,6 @@ export async function generateBrief(
  * materially stronger claim than `gemini-*`, and the response should not blur
  * the two.
  */
-function modelChain(config: Config): string[] {
-    const chain = [config.GEMINI_MODEL, ...GEMMA_FALLBACK_MODEL_IDS];
-    return chain.filter((id, i) => id && chain.indexOf(id) === i);
-}
 
 /**
  * One REST call.
@@ -138,8 +242,12 @@ function modelChain(config: Config): string[] {
  * Uses `x-goog-api-key` rather than `?key=` so the credential does not end up
  * in a URL, an access log, or a referrer header.
  */
-async function callGemini(config: Config, modelId: string, prompt: string): Promise<string> {
-    const url = `${config.GEMINI_BASE_URL.replace(/\/$/, "")}/models/${modelId}:generateContent`;
+async function callGemini(
+    config: Config,
+    target: Target,
+    prompt: string,
+): Promise<string> {
+    const url = `${target.baseUrl}/${target.modelPath}:generateContent`;
 
     const response = await fetch(url, {
         method: "POST",
@@ -152,7 +260,14 @@ async function callGemini(config: Config, modelId: string, prompt: string): Prom
             contents: [{ role: "user", parts: [{ text: prompt }] }],
             generationConfig: {
                 temperature: 0.6,
-                maxOutputTokens: 200,
+                // Generous, because reasoning tokens are drawn from this budget
+                // and the model defaults to thinking on. At 200 the output
+                // arrived as a truncated fragment — "Babusar is a solid go for"
+                // — which is worse than no brief at all.
+                maxOutputTokens: 900,
+                // A three-sentence trail brief is not a reasoning task, and
+                // reasoning spends latency that a car-park user does not have.
+                thinkingConfig: { thinkingBudget: 0 },
             },
         }),
         signal: AbortSignal.timeout(config.GEMINI_TIMEOUT_MS),

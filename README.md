@@ -105,10 +105,19 @@ use the premade library voices over the API, and it reports that as
 reads exactly like exhausted credits. The app probes for a voice your tier can
 actually use and falls back on its own.
 
-**A Gemini `402` names a project, not a key.** "Prepayment credits are depleted"
-applies to whichever Google project the base URL bills against. The same key can
-authenticate fine — the models list endpoint is free — while `generateContent` is
-blocked. Changing `GEMINI_BASE_URL` changes which project is billed.
+**AI Studio and Vertex AI bill different projects.** A `402` from one says
+nothing about the other. This is not theoretical: the key behind this project
+was refused on AI Studio with *"prepayment credits are depleted"* while
+`gemini-2.5-flash` on a Vertex project answered normally. Setting
+`GOOGLE_CLOUD_PROJECT` is all it took.
+
+Related trap, and it cost a confusing 404: the two surfaces build the model path
+differently, and AI Studio's version is just `models/<id>`.
+
+```
+AI Studio  <base>/models/<id>
+Vertex     <base>/publishers/google/models/<id>
+```
 
 ### Verification scripts
 
@@ -124,18 +133,19 @@ mode that is either silent or actively misleading, so the script tests each one
 for the thing the app actually needs rather than for the key's mere validity:
 
 ```
-Open-Meteo         OK    forecast for 2026-10-11
-MongoDB Atlas      OK    24 observations, 1307ms, vector_index queryable
-Gemini / Gemma     FAIL  key is VALID (2 gemma models listed) but
-                         generateContent is refused: prepayment credits depleted
+Open-Meteo         OK    forecast for 2026-10-12
+MongoDB Atlas      OK    24 observations, vector_index queryable
+Gemini / Gemma     OK    gemini-2.5-flash on Vertex AI (2 gemma models listed)
+                         Open-weight Gemma is visible but not usable on this
+                         plan; brief runs on a hosted model.
 ElevenLabs         OK    2/2 voices work (including the configured one)
 SerpApi            OK    20 results
 Sentry             OK    project 4512232870838272
 ```
 
-Note the Gemini line: it can list models for free while every generation call is
-refused. "Valid key" and "usable key" are different claims, and only the second
-one matters.
+That Gemini line is worth reading carefully. The key **can** see the open-weight
+Gemma models and still cannot use them — so the brief runs on a hosted
+`gemini-2.5-flash`, and the check says so rather than claiming Gemma.
 
 ### Atlas specifics, learned the hard way
 
